@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Portal Rapor Orang Tua - E-Raport Qu</title>
+<meta name="description" content="Portal Rapor Orang Tua - lihat & unduh rapor anak Anda.">
+<meta name="theme-color" content="#0d5c3b">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%230d5c3b'/%3E%3Ctext x='50' y='65' font-size='55' text-anchor='middle' fill='white' font-family='Arial' font-weight='900'%3EQ%3C/text%3E%3C/svg%3E">
+
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+<style>
+  :root { --color-primary:#0d5c3b; --color-primary-hover:#064e3b; --color-primary-light:#ecfdf5; }
+  body { font-family: 'Inter', system-ui, -apple-system, Arial, sans-serif; background: linear-gradient(135deg, #ecfdf5 0%, #f0fdf4 50%, #ffffff 100%); min-height: 100vh; }
+  .gradient-header { background: linear-gradient(135deg, #0d5c3b 0%, #047857 50%, #059669 100%); }
+  .glass { background: rgba(255,255,255,0.85); backdrop-filter: blur(10px); }
+  .pulse-dot { animation: pulseDot 1.5s ease-in-out infinite; }
+  @keyframes pulseDot { 0%,100%{opacity:.4} 50%{opacity:1} }
+
+  /* === RAPOR PRINT-STYLE === */
+  .rapor-page { background: white; padding: 12mm; font-family: Arial, sans-serif; font-size: 13px; color: black; max-width: 210mm; margin: 0 auto; box-shadow: 0 10px 40px rgba(0,0,0,0.08); border-radius: 8px; position: relative; overflow: hidden; }
+  .rapor-page table { border-collapse: collapse; width: 100%; }
+  .rapor-page .border-black, .rapor-page td.b, .rapor-page th.b { border: 1px solid black; }
+  .rapor-page td, .rapor-page th { padding: 6px 8px; vertical-align: top; }
+  .rapor-page .head-bg { background-color: #d1d5db; font-weight: bold; }
+  .rapor-watermark { position: fixed; top:0; left:0; width:100vw; height:100vh; z-index:0; pointer-events:none; overflow:hidden; opacity:0.12; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+
+  @media print {
+    body { background: white !important; }
+    .no-print { display: none !important; }
+    .rapor-page { box-shadow: none !important; border-radius: 0 !important; padding: 10mm !important; max-width: none !important; }
+    @page { size: A4; margin: 10mm; }
+    .print-avoid-break { page-break-inside: avoid; }
+    .print-page-break { page-break-before: always; }
+    .print-page-break:first-child { page-break-before: avoid; }
+  }
+</style>
+</head>
+<body class="text-slate-800">
+
+<!-- ============ HEADER ============ -->
+<header class="gradient-header text-white shadow-2xl no-print">
+  <div class="max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
+    <div class="flex items-center gap-4 sm:gap-6">
+      <img id="hdrLogo" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='white'/%3E%3Ctext x='50' y='65' font-size='55' text-anchor='middle' fill='%230d5c3b' font-family='Arial' font-weight='900'%3EQ%3C/text%3E%3C/svg%3E"
+           class="w-16 h-16 sm:w-20 sm:h-20 object-contain bg-white rounded-2xl p-2 shadow-lg" alt="Logo">
+      <div class="flex-1 min-w-0">
+        <p class="text-emerald-100 text-xs sm:text-sm font-bold uppercase tracking-widest mb-1">Portal Rapor Orang Tua</p>
+        <h1 id="hdrSchool" class="text-xl sm:text-3xl font-extrabold leading-tight truncate">Memuat Sekolah...</h1>
+        <p id="hdrAddress" class="text-emerald-100 text-xs sm:text-sm font-medium mt-1 line-clamp-1">—</p>
+      </div>
+    </div>
+  </div>
+</header>
+
+<!-- ============ MAIN ============ -->
+<main class="max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-10">
+
+  <!-- Filter Bar -->
+  <section class="glass rounded-3xl p-5 sm:p-7 shadow-xl border border-emerald-100 mb-6 no-print" id="filterBar">
+    <h2 class="text-lg sm:text-xl font-extrabold text-emerald-900 mb-1 flex items-center gap-2">
+      <i class="fas fa-search-plus"></i> Cari Rapor Anak
+    </h2>
+    <p class="text-xs sm:text-sm text-slate-500 font-medium mb-5">Masukkan nama lengkap putra/putri sesuai data sekolah, lalu pilih tahun ajaran & semester.</p>
+
+    <div class="grid grid-cols-1 sm:grid-cols-12 gap-3 sm:gap-4">
+      <div class="sm:col-span-6">
+        <label class="block text-[11px] font-bold text-slate-600 mb-1.5 uppercase tracking-wider">Nama Siswa</label>
+        <div class="relative">
+          <i class="fas fa-user-graduate absolute left-4 top-1/2 -translate-y-1/2 text-emerald-600"></i>
+          <input id="qNama" type="text" placeholder="Contoh: Ahmad Fajar"
+            class="w-full pl-11 pr-4 py-3.5 bg-white border-2 border-emerald-100 rounded-2xl text-sm font-semibold focus:ring-4 focus:ring-emerald-100 focus:border-emerald-500 outline-none transition-all">
+        </div>
+      </div>
+      <div class="sm:col-span-3">
+        <label class="block text-[11px] font-bold text-slate-600 mb-1.5 uppercase tracking-wider">Tahun Ajaran</label>
+        <select id="qTahun" class="w-full px-3 py-3.5 bg-white border-2 border-emerald-100 rounded-2xl text-sm font-bold focus:ring-4 focus:ring-emerald-100 focus:border-emerald-500 outline-none">
+          <option value="2025/2026">2025/2026</option>
+          <option value="2024/2025">2024/2025</option>
+          <option value="2023/2024">2023/2024</option>
+          <option value="2026/2027">2026/2027</option>
+        </select>
+      </div>
+      <div class="sm:col-span-3">
+        <label class="block text-[11px] font-bold text-slate-600 mb-1.5 uppercase tracking-wider">Semester</label>
+        <select id="qSemester" class="w-full px-3 py-3.5 bg-white border-2 border-emerald-100 rounded-2xl text-sm font-bold focus:ring-4 focus:ring-emerald-100 focus:border-emerald-500 outline-none">
+          <option value="1">1 (Ganjil)</option>
+          <option value="2">2 (Genap)</option>
+        </select>
+      </div>
+    </div>
+
+    <button id="btnSearch" class="mt-5 w-full sm:w-auto bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-700 hover:to-green-700 text-white font-extrabold px-8 py-3.5 rounded-2xl shadow-lg flex items-center justify-center gap-2 transition-all">
+      <i class="fas fa-magnifying-glass"></i> Tampilkan Rapor
+    </button>
+  </section>
+
+  <!-- Status / Loader -->
+  <div id="status" class="hidden glass rounded-3xl p-6 shadow border border-emerald-100 text-center no-print">
+    <div class="text-emerald-700 text-3xl mb-3"><i class="fas fa-circle-notch fa-spin"></i></div>
+    <p id="statusText" class="font-bold text-slate-700">Memuat data sekolah...</p>
+  </div>
+
+  <!-- Result -->
+  <div id="resultWrap" class="hidden">
+    <div class="flex flex-col sm:flex-row gap-3 mb-4 no-print">
+      <button id="btnPrint" class="flex-1 sm:flex-none bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold px-6 py-3 rounded-2xl shadow-lg flex items-center justify-center gap-2">
+        <i class="fas fa-file-pdf"></i> Unduh / Cetak PDF
+      </button>
+      <button id="btnNew" class="flex-1 sm:flex-none bg-white hover:bg-slate-50 text-slate-700 font-bold px-6 py-3 rounded-2xl shadow border border-slate-200 flex items-center justify-center gap-2">
+        <i class="fas fa-rotate-left"></i> Cari Lagi
+      </button>
+    </div>
+    <div id="raporContainer"></div>
+  </div>
+
+  <!-- Empty / Welcome -->
+  <div id="welcome" class="glass rounded-3xl p-8 sm:p-12 shadow-xl border border-emerald-100 text-center no-print">
+    <div class="w-20 h-20 sm:w-24 sm:h-24 mx-auto bg-emerald-100 rounded-3xl flex items-center justify-center mb-5 text-emerald-700 text-4xl sm:text-5xl">
+      <i class="fas fa-book-open-reader"></i>
+    </div>
+    <h3 class="text-xl sm:text-2xl font-extrabold text-slate-800 mb-2">Selamat Datang, Orang Tua/Wali</h3>
+    <p class="text-slate-500 font-medium text-sm max-w-xl mx-auto leading-relaxed">
+      Pantau hasil belajar putra/putri Anda secara online. Masukkan <b>nama lengkap siswa</b> sesuai data sekolah,
+      pilih <b>tahun ajaran</b> dan <b>semester</b>, lalu tekan tombol <b>Tampilkan Rapor</b>.
+    </p>
+  </div>
+
+</main>
+
+<footer class="no-print text-center py-6 text-xs text-slate-400 font-medium">
+  © <span id="yr"></span> <span id="ftSchool">Portal Rapor</span> · Dibuat dengan <i class="fas fa-heart text-red-400"></i> oleh E-Raport Qu
+</footer>
+
+<script>
+/* ===== KONFIGURASI BACKEND (sama dengan E-Raport Qu) ===== */
+const __SC = (typeof window !== 'undefined' && window.SEKOLAH_CONFIG) ? window.SEKOLAH_CONFIG : {};
+const GAS_URL = __SC.appsScriptUrl || "https://script.google.com/macros/s/AKfycbxbO2Fi5EnZFuNcbLdkhQAg4nXHv_Ob7pcv0MmI6ZbQeNd-TOR0fMIhAbJB78W1lqM/exec";
+
+document.getElementById('yr').textContent = new Date().getFullYear();
+
+/* ===== Helper umum ===== */
+const $ = (id) => document.getElementById(id);
+const isValidScore = (v) => v !== null && v !== undefined && v !== '' && !isNaN(Number(v));
+const toProperCase = (s) => (s||'').toString().toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
+const cleanLogoUrl = (input) => {
+  if (!input) return '';
+  const m = input.match(/src\s*=\s*["']([^"']+)["']/);
+  if (m) return m[1];
+  return input.replace(/<[^>]*>?/gm, '').trim();
+};
+const fmtAbs = (n) => { const v = Number(n); return (!v || isNaN(v)) ? '-' : (v + ' Hari'); };
+const setStatus = (msg, spinning=true) => {
+  const el = $('status'); el.classList.remove('hidden');
+  $('statusText').textContent = msg;
+  el.querySelector('div').innerHTML = spinning
+    ? '<i class="fas fa-circle-notch fa-spin"></i>'
+    : '<i class="fas fa-triangle-exclamation text-amber-500"></i>';
+};
+const hideStatus = () => $('status').classList.add('hidden');
+
+/* ===== Cache data per tahun ajaran ===== */
+const dataCache = {};
+async function loadYear(tahunAjaran) {
+  if (dataCache[tahunAjaran]) return dataCache[tahunAjaran];
+  const formatted = tahunAjaran.replace(/\//g, '_').replace(/ /g, '');
+  const res = await fetch(GAS_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify({ action: 'loadAll', tahunAjaran: `Tahun_${formatted}` })
+  });
+  const json = await res.json();
+  if (json.status !== 'success' || !json.data) throw new Error('Data tahun ajaran tidak ditemukan.');
+  dataCache[tahunAjaran] = json.data;
+  return json.data;
+}
+
+/* ===== Init: muat data default untuk tampilkan header ===== */
+(async function init() {
+  setStatus('Memuat data sekolah...');
+  try {
+    const d = await loadYear('2025/2026');
+    applyHeader(d.profil || {});
+    hideStatus();
+  } catch (e) {
+    setStatus('Belum ada data. Silakan tetap masukkan nama & tekan tombol cari.', false);
+  }
+})();
+
+function applyHeader(profil) {
+  if (profil.namaSekolah) {
+    $('hdrSchool').textContent = profil.namaSekolah;
+    $('ftSchool').textContent = profil.namaSekolah;
+    document.title = `Portal Rapor - ${profil.namaSekolah}`;
+  }
+  if (profil.alamat) $('hdrAddress').textContent = profil.alamat;
+  if (profil.logo) $('hdrLogo').src = cleanLogoUrl(profil.logo);
+}
+
+/* ===== Logika hitung NA / predikat (mirror dari E-Raport Qu) ===== */
+function calculateNA(mapel, studentId, rombelSD, materiGuru, studentGrades) {
+  const materiKey = `${rombelSD}_${mapel}`;
+  const materi = (materiGuru || {})[materiKey] || [];
+  const scores = ((studentGrades || {})[mapel] || {})[studentId] || {};
+  let totalM = 0, countM = 0;
+  if (materi.length > 0) {
+    materi.forEach((m, idx) => {
+      if (m && m.trim() !== '' && isValidScore(scores[`m${idx}`])) {
+        totalM += Number(scores[`m${idx}`]); countM++;
+      }
+    });
+  }
+  if (countM === 0) {
+    Object.keys(scores).forEach(k => {
+      if (/^m\d+$/.test(k) && isValidScore(scores[k])) {
+        totalM += Number(scores[k]); countM++;
+      }
+    });
+  }
+  const stsValid = isValidScore(scores.sts);
+  const sasValid = isValidScore(scores.sas);
+  if (countM === 0 && !stsValid && !sasValid) return null;
+  const rataM = countM > 0 ? totalM / countM : 0;
+  const stsNum = stsValid ? Number(scores.sts) : 0;
+  const sasNum = sasValid ? Number(scores.sas) : 0;
+  let komp = 0;
+  if (countM > 0) komp++;
+  if (stsValid) komp++;
+  if (sasValid) komp++;
+  return parseFloat(((rataM + stsNum + sasNum) / komp).toFixed(2));
+}
+function getPredikat(nilai, kkm) {
+  if (nilai === null || nilai === undefined || isNaN(nilai)) return '-';
+  const n = parseFloat(nilai);
+  if (n >= (kkm.batasA||90)) return 'A';
+  if (n >= (kkm.batasB||80)) return 'B';
+  if (n >= (kkm.batasC||70)) return 'C';
+  return 'D';
+}
+function labelPredikat(p) {
+  return ({A:'Sangat Baik', B:'Baik', C:'Cukup', D:'Perlu Bimbingan'})[p] || '-';
+}
+function generateKokuText(row, sName, dimensiTarget, sharedTema) {
+  const lvl = (v) => { const n = Number(v); if (n===3||v==='A') return 3; if (n===2||v==='B') return 2; return 1; };
+  const dims = [
+    { name: dimensiTarget[0], n: lvl(row.d1) },
+    { name: dimensiTarget[1], n: lvl(row.d2) },
+    { name: dimensiTarget[2], n: lvl(row.d3) },
+  ];
+  const mahir = dims.filter(d => d.n === 3).map(d => d.name);
+  const cakap = dims.filter(d => d.n === 2).map(d => d.name);
+  const berkembang = dims.filter(d => d.n === 1).map(d => d.name);
+  const tema = (sharedTema && String(sharedTema).trim() !== '') ? String(sharedTema).trim()
+              : (row.tema && String(row.tema).trim() !== '' ? String(row.tema).trim() : 'Penguatan Profil Pelajar Pancasila');
+  const parts = [];
+  if (mahir.length) parts.push(`telah mahir dan menjadi teladan dalam ${mahir.join(', ')}`);
+  if (cakap.length) parts.push(`sudah cakap menerapkan ${cakap.join(', ')} secara mandiri`);
+  if (berkembang.length) parts.push(`mulai berkembang dan masih membutuhkan bimbingan dalam ${berkembang.join(', ')}`);
+  return `Ananda ${toProperCase(sName)} telah menyelesaikan kegiatan kokurikuler dengan tema "${tema}". Ananda ${parts.join(', serta ')}.`;
+}
+
+/* ===== Builder rapor HTML (mengikuti format cetak E-Raport Qu) ===== */
+function buildRapor(student, data) {
+  const profil = data.profil || {};
+  const mapelList = data.mapel || [];
+  const ekskulList = data.ekskul || [];
+  const ekskulData = data.ekskulData || {};
+  const kokuData = data.kokuData || {};
+  const dimensiTarget = data.dimensiTarget || ['Keimanan dan ketaqwaan kepada Tuhan yang Maha Esa','Kewargaan','Penalaran kritis'];
+  const absensi = data.absensi || {};
+  const materiGuru = data.materiGuru || {};
+  const studentGrades = data.studentGrades || {};
+  const kkm = data.kkmConfig || { batasA:90, batasB:80, batasC:70 };
+  const teachers = data.teachers || [];
+  const tema = data.temaConfig || {};
+
+  const wali = teachers.find(t => (t.waliKelas||'') === student.rombelSD);
+  const waliName = wali ? wali.nama : '-';
+  const waliNIP = wali ? wali.nip : '';
+  const kepsekNIP = profil.nip;
+
+  const kelasNum = parseInt((student.rombelSD||'').replace(/\D/g,''),10) || 1;
+  const fase = kelasNum <= 2 ? 'A' : (kelasNum <= 4 ? 'B' : 'C');
+
+  /* Mapel rows */
+  let totalNa = 0, countNa = 0;
+  const mapelRows = mapelList.map((m, i) => {
+    const na = calculateNA(m, student.id, student.rombelSD, materiGuru, studentGrades);
+    const p = getPredikat(na, kkm);
+    if (na !== null) { totalNa += na; countNa++; }
+    const desc = na === null
+      ? '<span class="italic text-slate-500">Belum ada nilai.</span>'
+      : `Ananda menunjukkan capaian <b>${labelPredikat(p)}</b> pada mata pelajaran ${m}.`;
+    return `<tr>
+      <td class="b text-center">${i+1}</td>
+      <td class="b">${m}</td>
+      <td class="b text-center font-bold">${na===null?'-':na}</td>
+      <td class="b">${desc}</td>
+    </tr>`;
+  }).join('');
+
+  /* Ekskul rows (no number after value) */
+  let visibleEks = 0;
+  const ekskulRows = ekskulList.map(e => {
+    const ev = (ekskulData[student.id] || {})[e] || { nilai: '' };
+    if (!ev.nilai || String(ev.nilai).trim() === '') return '';
+    visibleEks++;
+    return `<tr>
+      <td class="b text-center">${visibleEks}</td>
+      <td class="b">${e}</td>
+      <td class="b">${ev.nilai}</td>
+    </tr>`;
+  }).join('');
+  const ekskulSection = ekskulRows
+    ? `<table class="rapor-page-table mb-5" style="margin-top:0">
+         <thead><tr class="head-bg"><th class="b text-center w-12">No.</th><th class="b text-center w-56">Ekstrakurikuler</th><th class="b text-center">Keterangan</th></tr></thead>
+         <tbody>${ekskulRows}</tbody>
+       </table>` : '';
+
+  /* Kokurikuler text */
+  const rowK = kokuData[student.id] || { d1:'A', d2:'A', d3:'A' };
+  const kokuText = generateKokuText(rowK, student.nama, dimensiTarget, kokuData.__tema);
+
+  /* Absensi */
+  const a = absensi[student.id] || { sakit:0, izin:0, alfa:0 };
+
+  /* Watermark — tulisan nama sekolah lurus horizontal & berurutan ke bawah */
+  const opacity = (tema.watermarkOpacity || 12) / 100;
+  const color = tema.watermarkColor || '#fbcfe8';
+  const fontSize = tema.watermarkFontSize || 12;
+  const rowGap = tema.watermarkRowGap || 26;
+  const sName = String(profil.namaSekolah || 'SEKOLAH').toUpperCase();
+  const logo = profil.logo ? cleanLogoUrl(profil.logo) : '';
+  const oneLine = (Array(14).fill(sName)).join('&nbsp;&nbsp;&nbsp;•&nbsp;&nbsp;&nbsp;');
+  const lineStyle = `font-family:Arial,Helvetica,sans-serif; font-size:${fontSize}px; font-weight:800; letter-spacing:2px; color:${color}; white-space:nowrap; text-align:center; line-height:1;`;
+  let wmRows = '';
+  for (let i = 0; i < 60; i++) wmRows += `<div style="${lineStyle} margin-bottom:${rowGap}px;">${oneLine}</div>`;
+  const wm = (tema.useWatermark !== false) ? `
+    <div class="rapor-watermark" style="opacity:${opacity}">
+      <div style="position:absolute; top:0; left:0; right:0; padding-top:${rowGap}px;">${wmRows}</div>
+      ${logo ? `<img src="${logo}" style="position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); width:55%; max-width:55%; max-height:55%; object-fit:contain; opacity:0.55; mix-blend-mode:multiply;" />` : ''}
+    </div>` : '';
+
+  return `
+    <div class="rapor-page print-page-break" data-student="${student.nama}">
+      ${wm}
+      <div style="position:relative; z-index:10;">
+        <h1 style="text-align:center; font-weight:900; font-size:18px; letter-spacing:.5px; margin:0 0 14px;">LAPORAN HASIL BELAJAR</h1>
+
+        <table class="mb-4" style="font-size:13px; font-weight:bold;">
+          <tr>
+            <td style="width:15%">Nama Murid</td><td style="width:2%">:</td><td class="uppercase" style="width:43%">${student.nama||'-'}</td>
+            <td style="width:15%; padding-left:16px">Kelas</td><td style="width:2%">:</td><td style="width:23%">${student.rombelSD||'-'}</td>
+          </tr>
+          <tr>
+            <td>NISN</td><td>:</td><td>${student.nisn||'-'}</td>
+            <td style="padding-left:16px">Fase</td><td>:</td><td>${fase}</td>
+          </tr>
+          <tr>
+            <td>Sekolah</td><td>:</td><td>${profil.namaSekolah||'-'}</td>
+            <td style="padding-left:16px">Semester</td><td>:</td><td>${profil.semester||'-'}</td>
+          </tr>
+          <tr>
+            <td>Alamat</td><td>:</td><td class="capitalize">${profil.alamat||'-'}</td>
+            <td style="padding-left:16px">Tahun Ajaran</td><td>:</td><td>${profil.tahunAjaran||'-'}</td>
+          </tr>
+        </table>
+
+        <table class="mb-5">
+          <thead><tr class="head-bg">
+            <th class="b text-center w-12">No.</th>
+            <th class="b text-center w-56">Mata Pelajaran</th>
+            <th class="b text-center w-24">Nilai Akhir</th>
+            <th class="b text-center">Capaian Kompetensi</th>
+          </tr></thead>
+          <tbody>${mapelRows || '<tr><td colspan="4" class="b text-center italic text-slate-500" style="padding:18px">Belum ada mata pelajaran.</td></tr>'}</tbody>
+        </table>
+
+        <div class="print-avoid-break">
+          <div class="b head-bg text-center" style="border-bottom:0; font-weight:bold; padding:8px">Kokurikuler</div>
+          <div class="b" style="font-style:italic; padding:12px; line-height:1.6; text-align:justify; margin-bottom:20px">${kokuText}</div>
+        </div>
+
+        ${ekskulSection}
+
+        <div style="display:flex; gap:16px; margin-bottom:20px" class="print-avoid-break">
+          <div style="width:33.33%">
+            <table>
+              <thead><tr class="head-bg"><th class="b text-center" colspan="2">Ketidakhadiran</th></tr></thead>
+              <tbody>
+                <tr><td class="b">Sakit</td><td class="b text-center" style="width:80px">${fmtAbs(a.sakit)}</td></tr>
+                <tr><td class="b">Izin</td><td class="b text-center">${fmtAbs(a.izin)}</td></tr>
+                <tr><td class="b">Tanpa Keterangan</td><td class="b text-center">${fmtAbs(a.alfa)}</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div style="width:66.67%; display:flex; flex-direction:column">
+            <div class="b head-bg text-center" style="border-bottom:0; font-weight:bold; padding:8px">Catatan untuk Orang Tua</div>
+            <div class="b" style="flex:1; padding:12px; font-style:italic; line-height:1.6; text-align:justify">
+              Pertahankan semangat belajar Ananda. Mohon dukungan Bapak/Ibu agar terus memotivasi putra/putri di rumah.
+            </div>
+          </div>
+        </div>
+
+        <div style="display:flex; justify-content:space-between; margin-top:30px; font-size:13px;">
+          <div style="text-align:center; width:33%">
+            <p style="margin-bottom:60px">Mengetahui,<br/>Orang Tua/Wali Murid</p>
+            <p style="border-bottom:1px solid black; width:200px; margin:0 auto; padding-bottom:2px">(...........................................)</p>
+          </div>
+          <div style="text-align:center; width:33%">
+            <p style="margin-bottom:60px">Mengetahui,<br/>Kepala Sekolah</p>
+            <p style="font-weight:bold; text-decoration:underline; text-transform:uppercase; margin:0">${profil.kepalaSekolah||'-'}</p>
+            ${kepsekNIP ? `<p style="margin:0">NIP. ${kepsekNIP}</p>` : ''}
+          </div>
+          <div style="text-align:center; width:33%">
+            <p style="margin:0">${profil.kecamatan ? profil.kecamatan.split(',')[0].trim() : ''}, ${profil.tanggalRaport||''}</p>
+            <p style="margin-bottom:60px">Wali Kelas</p>
+            <p style="font-weight:bold; text-decoration:underline; text-transform:uppercase; margin:0">${waliName}</p>
+            ${waliNIP ? `<p style="margin:0">NIP. ${waliNIP}</p>` : ''}
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+/* ===== Cari & tampilkan ===== */
+$('btnSearch').addEventListener('click', async () => {
+  const nama = ($('qNama').value || '').trim();
+  const tahun = $('qTahun').value;
+  const semester = $('qSemester').value;
+  if (!nama) { alert('Mohon masukkan nama siswa terlebih dahulu.'); return; }
+
+  $('welcome').classList.add('hidden');
+  $('resultWrap').classList.add('hidden');
+  setStatus(`Mencari rapor "${nama}" (TA ${tahun}, Semester ${semester})...`);
+
+  try {
+    const data = await loadYear(tahun);
+    applyHeader(data.profil || {});
+
+    /* cocokkan semester (jika tersimpan dalam profil, kita peringatkan jika berbeda — tetap tampilkan) */
+    const profilSemester = String(data.profil?.semester || '').toLowerCase();
+    const semOk = (semester === '1' && (profilSemester.includes('1') || profilSemester.includes('ganjil') || profilSemester.includes('satu')))
+               || (semester === '2' && (profilSemester.includes('2') || profilSemester.includes('genap') || profilSemester.includes('dua')));
+
+    const all = data.allStudents || [];
+    const needle = nama.toLowerCase();
+    const matches = all.filter(s => (s.nama||'').toLowerCase().includes(needle));
+
+    if (matches.length === 0) {
+      setStatus(`Tidak ditemukan siswa dengan nama mengandung "${nama}" pada TA ${tahun}.`, false);
+      return;
+    }
+
+    /* Bangun rapor untuk semua kecocokan */
+    let html = '';
+    if (!semOk && profilSemester) {
+      html += `<div class="bg-amber-50 border-2 border-amber-200 rounded-2xl p-4 mb-5 text-amber-800 text-sm font-bold flex items-start gap-3 no-print">
+        <i class="fas fa-circle-info mt-0.5"></i>
+        <div>Catatan: Data tersimpan saat ini untuk Semester <b>${data.profil.semester}</b>. Rapor di bawah menampilkan data terbaru sekolah.</div>
+      </div>`;
+    }
+    matches.forEach(s => { html += buildRapor(s, data); });
+    $('raporContainer').innerHTML = html;
+    $('resultWrap').classList.remove('hidden');
+    hideStatus();
+    window.scrollTo({ top: $('resultWrap').offsetTop - 20, behavior: 'smooth' });
+  } catch (e) {
+    console.error(e);
+    setStatus('Gagal memuat data. Periksa koneksi atau hubungi admin sekolah.', false);
+  }
+});
+
+$('btnNew').addEventListener('click', () => {
+  $('resultWrap').classList.add('hidden');
+  $('welcome').classList.remove('hidden');
+  $('qNama').value = '';
+  $('qNama').focus();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+});
+
+$('btnPrint').addEventListener('click', () => {
+  /* Sisakan 1 watermark agar position:fixed otomatis berulang per halaman cetak */
+  const wms = document.querySelectorAll('.rapor-watermark');
+  for (let i = 1; i < wms.length; i++) wms[i].remove();
+  setTimeout(() => window.print(), 150);
+});
+</script>
+
+</body>
+</html>
