@@ -1,5 +1,3 @@
-
-
 <!DOCTYPE html>
 <html lang="id">
 <head>
@@ -125,6 +123,7 @@
     const RefreshCw = (p) => <Icon name="fa-sync-alt" {...p} />;
     const ExternalLink = (p) => <Icon name="fa-external-link-alt" {...p} />;
     const Trash2 = (p) => <Icon name="fa-trash-alt" {...p} />;
+    const Edit = (p) => <Icon name="fa-edit" {...p} />;
     const PieChart = (p) => <Icon name="fa-chart-pie" {...p} />;
     const Filter = (p) => <Icon name="fa-filter" {...p} />;
     const FileBadge = (p) => <Icon name="fa-id-badge" {...p} />;
@@ -950,8 +949,32 @@
       const [showIosHint, setShowIosHint] = useState(false);
       // === Daftar tahun ajaran yang ada di database lokal sekolah ini ===
       const knownYears = (() => {
-         try { return JSON.parse(localStorage.getItem(LSK('knownYears')) || '[]'); }
-         catch(_) { return []; }
+         const set = new Set();
+         // 1. Dari registry knownYears
+         try {
+            const arr = JSON.parse(localStorage.getItem(LSK('knownYears')) || '[]');
+            arr.forEach(y => { if (/^\d{4}\/\d{4}$/.test(y)) set.add(y); });
+         } catch(_) {}
+         // 2. Auto-deteksi dari cache eraaport_cache_YYYY_YYYY yang sudah ada
+         try {
+            const prefix = LSK('eraaport_cache_');
+            for (let i = 0; i < localStorage.length; i++) {
+               const k = localStorage.key(i);
+               if (k && k.startsWith(prefix)) {
+                  const y = k.substring(prefix.length).replace('_','/');
+                  if (/^\d{4}\/\d{4}$/.test(y)) set.add(y);
+               }
+            }
+         } catch(_) {}
+         // 3. Dari activeTahunAjaran terakhir
+         try {
+            const a = (localStorage.getItem(LSK('activeTahunAjaran')) || '').replace('_','/');
+            if (/^\d{4}\/\d{4}$/.test(a)) set.add(a);
+         } catch(_) {}
+         const list = Array.from(set).sort();
+         // Persist hasil deteksi agar konsisten lintas reload
+         try { localStorage.setItem(LSK('knownYears'), JSON.stringify(list)); } catch(_) {}
+         return list;
       })();
       const currentActive = (() => {
          const a = localStorage.getItem(LSK('activeTahunAjaran')) || '';
