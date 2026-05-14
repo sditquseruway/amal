@@ -1,4 +1,5 @@
 
+
 <!DOCTYPE html>
 <html lang="id">
 <head>
@@ -138,6 +139,28 @@
     // === KONFIGURASI BACKEND GOOGLE APPS SCRIPT ===
     // === MULTI-SEKOLAH: override dari loader (window.SEKOLAH_CONFIG) ===
     const __SC = (typeof window !== 'undefined' && window.SEKOLAH_CONFIG) ? window.SEKOLAH_CONFIG : {};
+    // === MULTI-TENANT FIX: prefix semua localStorage per kode sekolah ===
+    const __SCHOOL_KEY = (__SC.kode || __SC.npsn || 'default').toString().toLowerCase().replace(/[^a-z0-9]/g,'');
+    const LSK = (k) => `${__SCHOOL_KEY}::${k}`;
+    // Auto-clear cache jika user buka link sekolah berbeda di origin yg sama
+    try {
+      const _last = localStorage.getItem('__eraport_last_school');
+      if (_last && _last !== __SCHOOL_KEY) {
+        Object.keys(localStorage).forEach(k => {
+          if (k.startsWith('eraaport_') || k.startsWith('activeTahunAjaran')) localStorage.removeItem(k);
+        });
+      }
+      localStorage.setItem('__eraport_last_school', __SCHOOL_KEY);
+    } catch(_) {}
+    // Sanitizer logo (kalau user paste tag <img>/<a> mentah dari ibb.co)
+    const __cleanUrl = (s) => {
+      if (!s) return '';
+      const m = String(s).match(/src\s*=\s*["']([^"']+)["']/i);
+      if (m) return m[1];
+      const m2 = String(s).match(/href\s*=\s*["']([^"']+)["']/i);
+      if (m2 && /\.(png|jpe?g|gif|webp|svg)/i.test(m2[1])) return m2[1];
+      return String(s).replace(/<[^>]*>/g,'').trim();
+    };
     const GAS_URL = __SC.appsScriptUrl || "https://script.google.com/macros/s/AKfycbxbO2Fi5EnZFuNcbLdkhQAg4nXHv_Ob7pcv0MmI6ZbQeNd-TOR0fMIhAbJB78W1lqM/exec";
 
     const syncToCloud = async (key, payload, tahunAjaran) => {
@@ -162,7 +185,7 @@
       return input.replace(/<[^>]*>?/gm, '').trim(); 
     };
 
-    const INITIAL_PROFIL = { namaSekolah: __SC.nama || '', motto: __SC.motto || '', npsn: __SC.npsn || '', kepalaSekolah: __SC.kepalaSekolah || '', nip: __SC.nipKepsek || '', semester: '1 (SATU)', tahunAjaran: '2025/2026', tanggalRaport: '', kecamatan: __SC.kecamatan || '', alamat: __SC.alamat || '', logo: __SC.logoUrl || '' };
+    const INITIAL_PROFIL = { namaSekolah: __SC.nama || '', motto: __SC.motto || '', npsn: __SC.npsn || '', kepalaSekolah: __SC.kepalaSekolah || '', nip: __SC.nipKepsek || '', semester: '1 (SATU)', tahunAjaran: '2025/2026', tanggalRaport: '', kecamatan: __SC.kecamatan || '', alamat: __SC.alamat || '', logo: __cleanUrl(__SC.logoUrl) || '' };
     const INITIAL_TEMA = { colorTheme: 'hijau', adminPhoto: '', useWatermark: true, watermarkOpacity: 15, watermarkColor: '#fbcfe8', watermarkFontSize: 12, watermarkRowGap: 26, tableHeaderBg: '#d1d5db', tableHeaderTxt: '#1f2937' };
     const INITIAL_APP_CONFIG = { deadline: '', isLocked: false, lockMessage: 'Waktu pengisian rapor telah berakhir.', broadcastMessage: '' };
     const INITIAL_TEACHERS = [];
@@ -328,7 +351,7 @@
       
       // PERSISTENT LOGIN (Sesi tidak hilang saat refresh)
       const [user, setUser] = useState(() => {
-         const saved = localStorage.getItem('eraaport_user');
+         const saved = localStorage.getItem(LSK('eraaport_user'));
          return saved ? JSON.parse(saved) : null;
       }); 
 
@@ -371,6 +394,11 @@
          });
          // Register service worker (offline cache) - inline blob
          if ('serviceWorker' in navigator) {
+            // === MULTI-TENANT FIX: unregister SW lama supaya tidak melayani cache sekolah lain ===
+            navigator.serviceWorker.getRegistrations().then(regs => regs.forEach(r => r.unregister())).catch(()=>{});
+            if (window.caches && caches.keys) caches.keys().then(ks => ks.forEach(k => caches.delete(k))).catch(()=>{});
+         }
+         if (false && 'serviceWorker' in navigator) {
             const swCode = `
               const CACHE = 'eraport-cache-v1';
               const ASSETS = [self.location.href.replace(/sw\\.js$/, '')];
@@ -483,8 +511,8 @@
         window.addEventListener('demo-toast', handleDemoToast);
 
         const fetchInitialData = async () => {
-          const activeYear = localStorage.getItem('activeTahunAjaran') || '2025_2026';
-          const cacheKey = `eraaport_cache_${activeYear}`;
+          const activeYear = localStorage.getItem(LSK('activeTahunAjaran')) || '2025_2026';
+          const cacheKey = LSK(`eraaport_cache_${activeYear}`);
           
           // 1. Cek cache localStorage terlebih dahulu agar load instan
           let usedCache = false;
@@ -577,13 +605,13 @@
       const handleLogin = (role, nama, username) => {
         const userData = { role, name: nama || (role === 'admin' ? (profilSekolah.kepalaSekolah || 'Admin Kepala Sekolah') : 'Guru'), username };
         setUser(userData);
-        localStorage.setItem('eraaport_user', JSON.stringify(userData));
+        localStorage.setItem(LSK('eraaport_user'), JSON.stringify(userData));
         setActiveMenu('dashboard');
       };
 
       // FUNGSI LOGOUT DIPERBAIKI: Tanpa reload halaman, langsung kembali ke Login Screen
       const handleLogout = () => {
-         localStorage.removeItem('eraaport_user');
+         localStorage.removeItem(LSK('eraaport_user'));
          window.isDemoAccount = false;
          setUser(null);
          setActiveMenu('dashboard');
@@ -1668,7 +1696,7 @@
       ];
 
       const handleSave = () => {
-        localStorage.setItem('activeTahunAjaran', profil.tahunAjaran.replace(/\//g, '_').replace(/ /g, ''));
+        localStorage.setItem(LSK('activeTahunAjaran'), profil.tahunAjaran.replace(/\//g, '_').replace(/ /g, ''));
         syncToCloud('profil', profil, profil.tahunAjaran);
         showToast('Profil Sekolah Berhasil Disimpan ke Database!');
       };
