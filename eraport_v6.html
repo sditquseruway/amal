@@ -230,6 +230,26 @@
       ]
     };
 
+
+    // === Helper Fase Kurikulum Merdeka (A–F) ===
+    // SD 1-2 = A, SD 3-4 = B, SD 5-6 = C, SMP 7-9 = D, SMA/SMK 10 = E, SMA/SMK 11-12 = F
+    const getFaseFromKelas = (kelasInput) => {
+       if (kelasInput === null || kelasInput === undefined) return '-';
+       let n = 0;
+       if (typeof kelasInput === 'number') n = kelasInput;
+       else {
+         const m = String(kelasInput).match(/\d+/);
+         n = m ? parseInt(m[0], 10) : 0;
+       }
+       if (n === 1 || n === 2) return 'A';
+       if (n === 3 || n === 4) return 'B';
+       if (n === 5 || n === 6) return 'C';
+       if (n >= 7 && n <= 9) return 'D';
+       if (n === 10) return 'E';
+       if (n === 11 || n === 12) return 'F';
+       return '-';
+    };
+
     const COLOR_THEMES = {
       hijau: { primary: '#0d5c3b', primaryHover: '#064e3b', primaryLight: '#ecfdf5' },
       biru: { primary: '#1d4ed8', primaryHover: '#1e3a8a', primaryLight: '#eff6ff' },
@@ -928,6 +948,28 @@
       const [error, setError] = useState('');
       const [imgError, setImgError] = useState(false);
       const [showIosHint, setShowIosHint] = useState(false);
+      // === Daftar tahun ajaran yang ada di database lokal sekolah ini ===
+      const knownYears = (() => {
+         try { return JSON.parse(localStorage.getItem(LSK('knownYears')) || '[]'); }
+         catch(_) { return []; }
+      })();
+      const currentActive = (() => {
+         const a = localStorage.getItem(LSK('activeTahunAjaran')) || '';
+         return a ? a.replace('_','/').replace(/_/g,'/') : (profil.tahunAjaran || '');
+      })();
+      const [selYear, setSelYear] = useState(currentActive || (knownYears[0] || ''));
+      const [newYear, setNewYear] = useState('');
+      const [showNewYear, setShowNewYear] = useState(knownYears.length === 0);
+
+      const applyYear = (yearStr) => {
+         if (!yearStr) return;
+         const fmt = yearStr.replace(/\//g, '_').replace(/ /g, '');
+         localStorage.setItem(LSK('activeTahunAjaran'), fmt);
+         try {
+            const arr = JSON.parse(localStorage.getItem(LSK('knownYears')) || '[]');
+            if (!arr.includes(yearStr)) { arr.push(yearStr); arr.sort(); localStorage.setItem(LSK('knownYears'), JSON.stringify(arr)); }
+         } catch(_) {}
+      };
 
       // Deteksi iOS / Safari (iOS tidak support beforeinstallprompt)
       const isIos = typeof window !== 'undefined' && /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
@@ -950,6 +992,20 @@
 
       const handleSubmit = (e) => {
         e.preventDefault();
+        // Pilih / buat tahun ajaran sebelum login
+        const finalYear = (showNewYear ? newYear.trim() : selYear).trim();
+        if (!finalYear || !/^\d{4}\/\d{4}$/.test(finalYear)) {
+           setError('Tahun ajaran tidak valid. Format: 2025/2026');
+           return;
+        }
+        const prevActive = (localStorage.getItem(LSK('activeTahunAjaran')) || '');
+        const newActive = finalYear.replace(/\//g, '_').replace(/ /g, '');
+        applyYear(finalYear);
+        // Jika user pindah tahun ajaran, reload supaya data tahun yang dipilih dimuat
+        if (prevActive && prevActive !== newActive) {
+           window.location.reload();
+           return;
+        }
         // LOGIKA AKUN DEMO
         if (username.toLowerCase() === 'demo_admin') {
           window.isDemoAccount = true;
@@ -999,6 +1055,26 @@
             </div>
             {error && <div className="bg-red-50 text-red-600 font-bold text-sm p-4 rounded-xl mb-6 text-center border border-red-100">{error}</div>}
             <form onSubmit={handleSubmit} className="space-y-4">
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-2">
+                <label className="block text-[10px] font-extrabold text-slate-500 uppercase tracking-wider">Tahun Ajaran (Database Sekolah)</label>
+                {!showNewYear && knownYears.length > 0 && (
+                  <div className="flex gap-2">
+                    <select value={selYear} onChange={e => setSelYear(e.target.value)} className="flex-1 p-2.5 bg-white border border-slate-200 rounded-lg font-bold text-sm focus:ring-2 focus:ring-primary outline-none">
+                      {knownYears.map(y => <option key={y} value={y}>{y}</option>)}
+                    </select>
+                    <button type="button" onClick={() => setShowNewYear(true)} className="px-3 py-2 bg-primary text-white rounded-lg text-xs font-bold shadow-sm" title="Buat database baru">+ Baru</button>
+                  </div>
+                )}
+                {showNewYear && (
+                  <div className="flex gap-2">
+                    <input type="text" value={newYear} onChange={e => setNewYear(e.target.value)} placeholder="cth: 2026/2027" className="flex-1 p-2.5 bg-white border border-slate-200 rounded-lg font-bold text-sm focus:ring-2 focus:ring-primary outline-none text-center" />
+                    {knownYears.length > 0 && (
+                      <button type="button" onClick={() => setShowNewYear(false)} className="px-3 py-2 bg-slate-200 text-slate-700 rounded-lg text-xs font-bold">Batal</button>
+                    )}
+                  </div>
+                )}
+                <p className="text-[10px] text-slate-500 leading-tight">{knownYears.length === 0 ? 'Belum ada database sekolah. Masukkan tahun ajaran baru untuk mulai.' : 'Pilih tahun ajaran dari database, atau klik "+ Baru" untuk membuat database baru.'}</p>
+              </div>
               <input type="text" className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl font-medium focus:ring-2 focus:ring-primary outline-none transition-all text-center" placeholder="Masukkan Username Anda" value={username} onChange={e=>setUsername(e.target.value)} data-testid="login-username-input"/>
               <button type="submit" className="w-full bg-primary hover:bg-primaryHover text-white font-bold py-4 rounded-xl shadow-lg transition-all active:scale-[0.98]" data-testid="login-submit-btn">Masuk Aplikasi</button>
             </form>
@@ -1200,6 +1276,28 @@
         setLoadingCsv(false);
       };
 
+      const [editTeacher, setEditTeacher] = useState(null);
+      const [editGuruForm, setEditGuruForm] = useState({});
+      const openEditGuru = (t) => {
+         setEditTeacher(t);
+         setEditGuruForm({ nama: t.nama||'', nip: t.nip||'', waliKelas: t.waliKelas||'', mapel: t.mapel||'', username: t.username||'', ket: t.ket||'Aktif' });
+      };
+      const saveEditGuru = () => {
+         if (!editTeacher) return;
+         const updated = teachers.map(x => x.id === editTeacher.id ? { ...x, ...editGuruForm } : x);
+         setTeachers(updated);
+         syncToCloud('teachers', updated, profil.tahunAjaran);
+         setEditTeacher(null);
+         showToast('Data guru berhasil diperbarui!');
+      };
+      const deleteAllTeachers = () => {
+         showConfirm('PERINGATAN: Anda akan menghapus SELURUH data guru. Lanjutkan?', () => {
+            setTeachers([]);
+            syncToCloud('teachers', [], profil.tahunAjaran);
+            showToast('Semua data guru telah dihapus.');
+         });
+      };
+
       const deleteTeacher = (id) => {
         showConfirm('Yakin ingin menghapus data guru ini?', () => {
            const updated = teachers.filter(t => t.id !== id);
@@ -1272,14 +1370,42 @@
                     <td className="p-2 sm:px-4 sm:py-3 text-slate-600 font-medium">{t.mapel}</td>
                     <td className="p-2 sm:px-4 sm:py-3 text-primary font-bold">{t.username}</td>
                     <td className="p-2 sm:px-4 sm:py-3 text-center">
-                      <button onClick={() => deleteTeacher(t.id)} className="text-red-500 hover:text-red-700 hover:bg-red-50 p-1.5 sm:p-2 rounded-lg transition-colors"><Trash2/></button>
+                      <div className="flex items-center justify-center gap-1">
+                        <button onClick={() => openEditGuru(t)} title="Edit" className="text-blue-600 hover:text-blue-800 hover:bg-blue-50 p-1.5 sm:p-2 rounded-lg transition-colors"><Edit/></button>
+                        <button onClick={() => deleteTeacher(t.id)} title="Hapus" className="text-red-500 hover:text-red-700 hover:bg-red-50 p-1.5 sm:p-2 rounded-lg transition-colors"><Trash2/></button>
+                      </div>
                     </td>
                   </tr>
                 ))}
                 {teachers.length === 0 && <tr><td colSpan="7" className="p-8 text-center text-slate-400 font-bold text-xs sm:text-base">Belum Ada Data Guru. Silahkan Tambah.</td></tr>}
               </tbody>
             </table>
+            {teachers.length > 0 && (
+              <div className="p-3 border-t border-slate-200 bg-slate-50 flex justify-end">
+                 <button onClick={deleteAllTeachers} className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 shadow-md"><Trash2/> Hapus Semua Guru</button>
+              </div>
+            )}
           </div>
+
+          {editTeacher && (
+            <div className="fixed inset-0 z-[100] bg-black/50 flex items-center justify-center p-4">
+               <div className="bg-white rounded-2xl p-5 sm:p-6 max-w-xl w-full max-h-[90vh] overflow-y-auto">
+                  <h3 className="font-extrabold text-lg text-slate-800 mb-4">Edit Data Guru</h3>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                     {[['nama','Nama Guru'],['nip','NIP'],['waliKelas','Wali Kelas'],['mapel','Mata Pelajaran'],['username','Username'],['ket','Keterangan']].map(([k,lbl]) => (
+                        <label key={k} className="flex flex-col gap-1">
+                           <span className="text-[11px] font-bold text-slate-500 uppercase">{lbl}</span>
+                           <input className="p-2 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-primary" value={editGuruForm[k] || ''} onChange={e => setEditGuruForm({...editGuruForm, [k]: e.target.value})} />
+                        </label>
+                     ))}
+                  </div>
+                  <div className="flex gap-2 justify-end mt-5">
+                     <button onClick={() => setEditTeacher(null)} className="px-5 py-2 rounded-xl border border-slate-200 text-slate-600 font-bold">Batal</button>
+                     <button onClick={saveEditGuru} className="px-5 py-2 rounded-xl bg-primary hover:bg-primaryHover text-white font-bold shadow-md">Simpan Perubahan</button>
+                  </div>
+               </div>
+            </div>
+          )}
         </div>
       );
     }
@@ -1448,7 +1574,7 @@
     }
 
     function AdminDataSiswa({ allStudents, setAllStudents, profil, showToast, teachers }) {
-      const [csvUrl, setCsvUrl] = useState("https://docs.google.com/spreadsheets/d/e/2PACX-1vTj9NDKstrj0d9JH7PSMGc4X9ZP1JEarvqoXhF2BZcesqs52oW_jYNKd_fI832uYg/pub?gid=1632329455&single=true&output=csv");
+      const [csvUrl, setCsvUrl] = useState("");
       const [loading, setLoading] = useState(false);
       const [showPaste, setShowPaste] = useState(false);
       const [pasteData, setPasteData] = useState('');
@@ -1480,6 +1606,53 @@
           setShowPaste(false); setPasteData('');
           showToast(`${newSiswa.length} siswa berhasil diimpor!`);
         } catch(e) { showToast('Format paste tidak sesuai.'); }
+      };
+
+      const [editStudent, setEditStudent] = useState(null);
+      const [editForm, setEditForm] = useState({});
+      const openEditSiswa = (s) => {
+         setEditStudent(s);
+         setEditForm({
+            nama: s.nama || '', nisn: s.nisn || '', nis: s.nis || '',
+            rombelSD: s.rombelSD || '', tempatTanggalLahir: s.tempatTanggalLahir || '',
+            jenisKelamin: s.jenisKelamin || '', agama: s.agama || 'Islam',
+            namaAyah: s.namaAyah || '', namaIbu: s.namaIbu || '',
+            pekerjaanAyah: s.pekerjaanAyah || '', pekerjaanIbu: s.pekerjaanIbu || '',
+            jalan: (s.alamat && s.alamat.jalan) || '',
+            desa: (s.alamat && s.alamat.desa) || '',
+            kecamatan: (s.alamat && s.alamat.kecamatan) || '',
+            kabupaten: (s.alamat && s.alamat.kabupaten) || ''
+         });
+      };
+      const saveEditSiswa = () => {
+         if (!editStudent) return;
+         const updated = allStudents.map(x => x.id === editStudent.id ? {
+            ...x,
+            nama: editForm.nama, nisn: editForm.nisn, nis: editForm.nis,
+            rombelSD: editForm.rombelSD, tempatTanggalLahir: editForm.tempatTanggalLahir,
+            jenisKelamin: editForm.jenisKelamin, agama: editForm.agama,
+            namaAyah: editForm.namaAyah, namaIbu: editForm.namaIbu,
+            pekerjaanAyah: editForm.pekerjaanAyah, pekerjaanIbu: editForm.pekerjaanIbu,
+            alamat: { jalan: editForm.jalan, desa: editForm.desa, kecamatan: editForm.kecamatan, kabupaten: editForm.kabupaten }
+         } : x);
+         setAllStudents(updated);
+         syncToCloud('allStudents', updated, profil.tahunAjaran);
+         setEditStudent(null);
+         showToast('Data siswa berhasil diperbarui!');
+      };
+      const deleteSiswa = (id) => {
+         if (!window.confirm('Yakin ingin menghapus data siswa ini?')) return;
+         const updated = allStudents.filter(x => x.id !== id);
+         setAllStudents(updated);
+         syncToCloud('allStudents', updated, profil.tahunAjaran);
+         showToast('Data siswa berhasil dihapus.');
+      };
+      const deleteAllSiswa = () => {
+         if (!window.confirm('PERINGATAN: Anda akan menghapus SELURUH data siswa. Lanjutkan?')) return;
+         if (!window.confirm('Konfirmasi sekali lagi: hapus SEMUA siswa?')) return;
+         setAllStudents([]);
+         syncToCloud('allStudents', [], profil.tahunAjaran);
+         showToast('Semua data siswa telah dihapus.');
       };
 
       const downloadTemplateSiswa = () => {
@@ -1601,15 +1774,16 @@
                 <span>Tinjauan Data Siswa ({allStudents.length})</span>
              </div>
              <div className="overflow-x-auto max-h-[50vh]" style={{scrollbarWidth: 'thin'}}>
-               <table className="w-full text-left text-[10px] sm:text-sm table-fixed min-w-[700px] break-words">
+               <table className="w-full text-left text-[10px] sm:text-sm min-w-[820px] break-words">
                  <thead className="bg-slate-100 text-slate-600 sticky top-0 shadow-sm">
                     <tr>
                       <th className="p-2 sm:p-3 w-12 text-center border-r border-slate-200">No</th>
-                      <th className="p-2 sm:p-3 w-[15%] border-r border-slate-200">NISN</th>
-                      <th className="p-2 sm:p-3 w-[15%] border-r border-slate-200">NIS</th>
-                      <th className="p-2 sm:p-3 w-[30%] border-r border-slate-200">Nama Siswa</th>
-                      <th className="p-2 sm:p-3 w-[10%] text-center border-r border-slate-200">Kelas</th>
-                      <th className="p-2 sm:p-3 w-[20%] border-r border-slate-200">Wali Kelas</th>
+                      <th className="p-2 sm:p-3 border-r border-slate-200">NISN</th>
+                      <th className="p-2 sm:p-3 border-r border-slate-200">NIS</th>
+                      <th className="p-2 sm:p-3 border-r border-slate-200 whitespace-nowrap">Nama Siswa</th>
+                      <th className="p-2 sm:p-3 text-center border-r border-slate-200">Kelas</th>
+                      <th className="p-2 sm:p-3 border-r border-slate-200">Wali Kelas</th>
+                      <th className="p-2 sm:p-3 text-center w-[110px]">Aksi</th>
                     </tr>
                  </thead>
                  <tbody className="divide-y divide-slate-100 bg-white">
@@ -1620,17 +1794,53 @@
                            <td className="p-2 sm:p-3 text-center text-slate-400 font-bold border-r border-slate-100">{i+1}</td>
                            <td className="p-2 sm:p-3 text-slate-600 border-r border-slate-100">{s.nisn}</td>
                            <td className="p-2 sm:p-3 text-slate-600 border-r border-slate-100">{s.nis}</td>
-                           <td className="p-2 sm:p-3 font-bold text-slate-800 border-r border-slate-100">{s.nama}</td>
+                           <td className="p-2 sm:p-3 font-bold text-slate-800 border-r border-slate-100 whitespace-nowrap">{s.nama}</td>
                            <td className="p-2 sm:p-3 text-center border-r border-slate-100"><span className="bg-blue-100 text-blue-800 px-2 py-0.5 rounded font-bold">{s.rombelSD}</span></td>
                            <td className="p-2 sm:p-3 text-slate-600 text-xs border-r border-slate-100">{w ? w.nama : '-'}</td>
+                           <td className="p-2 sm:p-3 text-center">
+                              <div className="flex items-center justify-center gap-1">
+                                 <button onClick={() => openEditSiswa(s)} title="Edit" className="text-blue-600 hover:text-blue-800 hover:bg-blue-50 p-1.5 rounded-lg"><Edit/></button>
+                                 <button onClick={() => deleteSiswa(s.id)} title="Hapus" className="text-red-500 hover:text-red-700 hover:bg-red-50 p-1.5 rounded-lg"><Trash2/></button>
+                              </div>
+                           </td>
                          </tr>
                        )
                     })}
-                    {allStudents.length === 0 && <tr><td colSpan="6" className="p-8 text-center font-bold text-slate-400">Data belum disinkronisasi.</td></tr>}
+                    {allStudents.length === 0 && <tr><td colSpan="7" className="p-8 text-center font-bold text-slate-400">Data belum disinkronisasi.</td></tr>}
                  </tbody>
                </table>
              </div>
+             {allStudents.length > 0 && (
+               <div className="p-3 border-t border-slate-200 bg-slate-50 flex justify-end">
+                  <button onClick={deleteAllSiswa} className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 shadow-md"><Trash2/> Hapus Semua Siswa</button>
+               </div>
+             )}
           </div>
+
+          {editStudent && (
+            <div className="fixed inset-0 z-[100] bg-black/50 flex items-center justify-center p-4">
+              <div className="bg-white rounded-2xl p-5 sm:p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+                 <h3 className="font-extrabold text-lg text-slate-800 mb-4">Edit Data Siswa</h3>
+                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                    {[
+                      ['nama','Nama Lengkap'],['nisn','NISN'],['nis','NIS'],['rombelSD','Kelas/Rombel (cth: 4A)'],
+                      ['tempatTanggalLahir','Tempat, Tanggal Lahir'],['jenisKelamin','Jenis Kelamin'],['agama','Agama'],
+                      ['namaAyah','Nama Ayah'],['namaIbu','Nama Ibu'],['pekerjaanAyah','Pekerjaan Ayah'],['pekerjaanIbu','Pekerjaan Ibu'],
+                      ['jalan','Dusun/Jalan'],['desa','Desa'],['kecamatan','Kecamatan'],['kabupaten','Kabupaten']
+                    ].map(([k,lbl]) => (
+                       <label key={k} className="flex flex-col gap-1">
+                          <span className="text-[11px] font-bold text-slate-500 uppercase">{lbl}</span>
+                          <input className="p-2 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-primary" value={editForm[k] || ''} onChange={e => setEditForm({...editForm, [k]: e.target.value})} />
+                       </label>
+                    ))}
+                 </div>
+                 <div className="flex gap-2 justify-end mt-5">
+                    <button onClick={() => setEditStudent(null)} className="px-5 py-2 rounded-xl border border-slate-200 text-slate-600 font-bold">Batal</button>
+                    <button onClick={saveEditSiswa} className="px-5 py-2 rounded-xl bg-primary hover:bg-primaryHover text-white font-bold shadow-md">Simpan Perubahan</button>
+                 </div>
+              </div>
+            </div>
+          )}
         </div>
       );
     }
@@ -1716,14 +1926,25 @@
         { key: 'nip', label: 'NIP Kepala Sekolah', type: 'text' },
         { key: 'semester', label: 'Semester', type: 'text' },
         { key: 'tahunAjaran', label: 'Tahun Ajaran', type: 'text' },
-        { key: 'tanggalRaport', label: 'Tanggal Raport', type: 'text' },
+        { key: 'tanggalRaport', label: 'Tanggal Raport (otomatis tercetak di TTD)', type: 'date' },
         { key: 'kecamatan', label: 'Kecamatan di Raport (Otomatis dipakai untuk Titimangsa TTD)', type: 'text' },
         { key: 'alamat', label: 'Alamat Sekolah', type: 'textarea' },
         { key: 'logo', label: 'Link Logo Sekolah (G-Drive atau URL Bebas)', type: 'text' }
       ];
 
       const handleSave = () => {
-        localStorage.setItem(LSK('activeTahunAjaran'), profil.tahunAjaran.replace(/\//g, '_').replace(/ /g, ''));
+        const ay = profil.tahunAjaran.replace(/\//g, '_').replace(/ /g, '');
+        localStorage.setItem(LSK('activeTahunAjaran'), ay);
+        // Catat tahun ajaran yang pernah dipakai sekolah ini agar muncul di dropdown login
+        try {
+           const raw = localStorage.getItem(LSK('knownYears')) || '[]';
+           const arr = JSON.parse(raw);
+           if (profil.tahunAjaran && !arr.includes(profil.tahunAjaran)) {
+              arr.push(profil.tahunAjaran);
+              arr.sort();
+              localStorage.setItem(LSK('knownYears'), JSON.stringify(arr));
+           }
+        } catch(_) {}
         syncToCloud('profil', profil, profil.tahunAjaran);
         showToast('Profil Sekolah Berhasil Disimpan ke Database!');
       };
@@ -3253,7 +3474,7 @@
             <tr>
               <td style="border:1px solid black; padding:${cellPad}; text-align:center; font-size:${fontSize};">${i+1}</td>
               <td style="border:1px solid black; padding:${cellPad}; text-align:center; font-size:${fontSize};">${s.nisn || '-'}</td>
-              <td style="border:1px solid black; padding:${cellPad}; font-weight:bold; text-transform:uppercase; font-size:${fontSize}; text-align:left;">${s.nama}</td>
+              <td style="border:1px solid black; padding:${cellPad}; font-weight:bold; text-transform:uppercase; font-size:${fontSize}; text-align:left; white-space:nowrap;">${s.nama}</td>
               ${mapelCols}
               <td style="border:1px solid black; padding:${cellPad}; text-align:center; background-color:#f3f4f6 !important; font-weight:bold; -webkit-print-color-adjust:exact; font-size:${fontSize};">${Math.round(s.total)}</td>
               <td style="border:1px solid black; padding:${cellPad}; text-align:center; background-color:#f3f4f6 !important; font-weight:bold; -webkit-print-color-adjust:exact; font-size:${fontSize};">${s.avg}</td>
@@ -3308,7 +3529,7 @@
                 <tr>
                   <th style="width:30px;">No</th>
                   <th style="width:78px;">NISN</th>
-                  <th style="min-width:160px; text-align:left; padding-left:8px;">Nama Murid</th>
+                  <th class="nama-head" style="white-space:nowrap; text-align:left; padding-left:8px; padding-right:8px;">Nama Murid</th>
                   ${theadMapel}
                   <th style="width:46px;">JML</th>
                   <th style="width:50px;">Rata-Rata</th>
@@ -3368,7 +3589,7 @@
               <thead className="bg-primary text-white">
                 <tr>
                   <th className="p-1 sm:p-2 text-center border-r border-primaryHover font-bold align-middle" style={{width:'32px'}}>No</th>
-                  <th className="p-1 sm:p-2 text-left border-r border-primaryHover font-extrabold align-middle" style={{minWidth:'150px'}}>Nama Siswa</th>
+                  <th className="p-1 sm:p-2 text-left border-r border-primaryHover font-extrabold align-middle whitespace-nowrap" style={{width:'1%', minWidth:'max-content'}}>Nama Siswa</th>
                   {visibleMapels.map(m => (
                     <th key={m} className="p-1 sm:p-2 text-center border-r border-primaryHover font-bold align-middle whitespace-nowrap" style={{minWidth:'46px'}} title={m}>
                       {getMapelAbbr(m)}
@@ -3448,10 +3669,7 @@
         
         let numMatch = s.rombelSD ? s.rombelSD.match(/\d+/) : null;
         let kelasNum = numMatch ? parseInt(numMatch[0]) : 0;
-        let fase = '-';
-        if(kelasNum === 1 || kelasNum === 2) fase = 'A';
-        else if(kelasNum === 3 || kelasNum === 4) fase = 'B';
-        else if(kelasNum === 5 || kelasNum === 6) fase = 'C';
+        let fase = getFaseFromKelas(kelasNum);
 
         const currentTeacher = teachers.find(t => t.nama === waliKelasName);
         const waliNIP = currentTeacher && currentTeacher.nip && currentTeacher.nip !== '-' ? currentTeacher.nip : '';
