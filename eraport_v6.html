@@ -161,21 +161,48 @@
       if (m2 && /\.(png|jpe?g|gif|webp|svg)/i.test(m2[1])) return m2[1];
       return String(s).replace(/<[^>]*>/g,'').trim();
     };
-    const GAS_URL = __SC.appsScriptUrl || "https://script.google.com/macros/s/AKfycbxbO2Fi5EnZFuNcbLdkhQAg4nXHv_Ob7pcv0MmI6ZbQeNd-TOR0fMIhAbJB78W1lqM/exec";
+    // === GAS_URL WAJIB datang dari SEKOLAH_CONFIG (multi-tenant). Tidak ada fallback agar data tidak nyasar ke DB sekolah lain. ===
+    const GAS_URL = (__SC.appsScriptUrl || '').trim();
+    if (!GAS_URL) {
+      console.error('[E-Raport] window.SEKOLAH_CONFIG.appsScriptUrl belum diisi. Data TIDAK akan tersimpan ke database. Pastikan loader sekolah ini benar.');
+      try {
+        const warn = document.createElement('div');
+        warn.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#dc2626;color:#fff;padding:10px;font:600 13px system-ui;text-align:center';
+        warn.textContent = '⚠ Konfigurasi sekolah tidak terdeteksi. Data tidak akan tersimpan. Buka aplikasi dari link loader sekolah Anda.';
+        document.addEventListener('DOMContentLoaded', () => document.body && document.body.appendChild(warn));
+      } catch(_) {}
+    }
 
     const syncToCloud = async (key, payload, tahunAjaran) => {
       if (window.isDemoAccount) {
         window.dispatchEvent(new CustomEvent('demo-toast', { detail: "Akun Demo Aktif: Hanya mode baca." }));
         return;
       }
+      if (!GAS_URL) {
+        console.error(`[Cloud Sync Skipped] GAS_URL kosong. Key: ${key}`);
+        window.dispatchEvent(new CustomEvent('demo-toast', { detail: "❌ Database belum tersambung. Data tidak tersimpan." }));
+        return;
+      }
       try {
         const formattedTahunAjaran = tahunAjaran ? tahunAjaran.replace(/\//g, '_').replace(/ /g, '') : '2025_2026';
-        await fetch(GAS_URL, {
+        const res = await fetch(GAS_URL, {
           method: 'POST',
           headers: { 'Content-Type': 'text/plain;charset=utf-8' },
           body: JSON.stringify({ action: 'save', key, payload, tahunAjaran: `Tahun_${formattedTahunAjaran}` })
         });
-      } catch (error) { console.error(`[Cloud Sync Failed] Key: ${key}`, error); }
+        const txt = await res.text();
+        let json = {};
+        try { json = JSON.parse(txt); } catch(_) {}
+        if (!res.ok || json.status !== 'success') {
+          console.error(`[Cloud Sync Failed] Key: ${key}`, res.status, txt.slice(0,200));
+          window.dispatchEvent(new CustomEvent('demo-toast', { detail: `❌ Gagal menyimpan ${key}. Cek koneksi atau izin Apps Script.` }));
+        } else {
+          console.log(`[Cloud Sync OK] ${key} → ${GAS_URL.slice(-12)}`);
+        }
+      } catch (error) {
+        console.error(`[Cloud Sync Failed] Key: ${key}`, error);
+        window.dispatchEvent(new CustomEvent('demo-toast', { detail: `❌ Gagal kirim ${key} ke database.` }));
+      }
     };
 
     const cleanLogoUrl = (input) => {
