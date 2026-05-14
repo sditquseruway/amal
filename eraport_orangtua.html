@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="id">
 <head>
@@ -137,7 +138,16 @@
 <script>
 /* ===== KONFIGURASI BACKEND (sama dengan E-Raport Qu) ===== */
 const __SC = (typeof window !== 'undefined' && window.SEKOLAH_CONFIG) ? window.SEKOLAH_CONFIG : {};
-const GAS_URL = __SC.appsScriptUrl || "https://script.google.com/macros/s/AKfycbxbO2Fi5EnZFuNcbLdkhQAg4nXHv_Ob7pcv0MmI6ZbQeNd-TOR0fMIhAbJB78W1lqM/exec";
+const GAS_URL = (__SC.appsScriptUrl || '').trim();
+if (!GAS_URL) {
+  console.error('[Portal Orang Tua] window.SEKOLAH_CONFIG.appsScriptUrl belum diisi. Buka dari link loader sekolah Anda.');
+  document.addEventListener('DOMContentLoaded', () => {
+    const w = document.createElement('div');
+    w.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#dc2626;color:#fff;padding:10px;font:600 13px system-ui;text-align:center';
+    w.textContent = '⚠ Konfigurasi sekolah tidak terdeteksi. Buka dari link loader resmi sekolah Anda.';
+    document.body && document.body.appendChild(w);
+  });
+}
 
 document.getElementById('yr').textContent = new Date().getFullYear();
 
