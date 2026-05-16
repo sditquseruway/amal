@@ -183,16 +183,17 @@
         return;
       }
       try {
-        let activeKey = '';
-        try { activeKey = localStorage.getItem(LSK('activeTahunAjaran')) || ''; } catch(_) {}
-        if (!activeKey) {
-           const fmtTA = tahunAjaran ? tahunAjaran.replace(/\//g, '_').replace(/ /g, '') : '2025_2026';
-           activeKey = fmtTA + '_semester_1';
+        // === FIX: selalu baca dbId aktif dari localStorage (multi-database semester) ===
+        const _activeDbId = (localStorage.getItem(LSK('activeTahunAjaran')) || '').trim();
+        if (!_activeDbId) {
+          console.warn('[Cloud Sync] activeTahunAjaran kosong, batal simpan', key);
+          return;
         }
+        const formattedTahunAjaran = _activeDbId;
         const res = await fetch(GAS_URL, {
           method: 'POST',
           headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-          body: JSON.stringify({ action: 'save', key, payload, tahunAjaran: `Tahun_${activeKey}` })
+          body: JSON.stringify({ action: 'save', key, payload, tahunAjaran: `Tahun_${formattedTahunAjaran}` })
         });
         const txt = await res.text();
         let json = {};
@@ -207,6 +208,46 @@
         console.error(`[Cloud Sync Failed] Key: ${key}`, error);
         window.dispatchEvent(new CustomEvent('demo-toast', { detail: `❌ Gagal kirim ${key} ke database.` }));
       }
+    };
+
+    // === Helpers Database Registry (multi tahun & semester) ===
+    const DB_REGISTRY_KEY = 'REGISTRY';
+    const fmtDbId = (tahun, semester) => {
+       const t = (tahun||'').replace(/\//g,'_').replace(/ /g,'');
+       const sm = String(semester||'').match(/\d+/);
+       return sm ? `${t}_semester_${sm[0]}` : t;
+    };
+    const labelDb = (tahun, semester) => `${tahun} — Semester ${String(semester||'').match(/\d+/)?.[0]||'?'}`;
+    const fetchDatabaseRegistry = async () => {
+       if (!GAS_URL) return [];
+       try {
+          const res = await fetch(GAS_URL, {
+             method: 'POST',
+             headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+             body: JSON.stringify({ action: 'loadAll', tahunAjaran: `Tahun_${DB_REGISTRY_KEY}` })
+          });
+          const json = await res.json();
+          const list = (json && json.data && Array.isArray(json.data.databases)) ? json.data.databases : [];
+          try { localStorage.setItem(LSK('knownDatabases'), JSON.stringify(list)); } catch(_) {}
+          return list;
+       } catch(e) {
+          console.warn('[Registry] gagal ambil daftar database', e);
+          try { return JSON.parse(localStorage.getItem(LSK('knownDatabases')) || '[]'); } catch(_) { return []; }
+       }
+    };
+    const saveDatabaseRegistry = async (list) => {
+       if (!GAS_URL) return;
+       try { localStorage.setItem(LSK('knownDatabases'), JSON.stringify(list)); } catch(_) {}
+       try {
+          await fetch(GAS_URL, {
+             method: 'POST',
+             headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+             body: JSON.stringify({ action: 'save', key: 'databases', payload: list, tahunAjaran: `Tahun_${DB_REGISTRY_KEY}` })
+          });
+       } catch(e) { console.error('[Registry] gagal simpan', e); }
+    };
+    const getLocalDatabases = () => {
+       try { return JSON.parse(localStorage.getItem(LSK('knownDatabases')) || '[]'); } catch(_) { return []; }
     };
 
     const cleanLogoUrl = (input) => {
@@ -434,7 +475,6 @@
       const [guruRombelConfig, setGuruRombelConfig] = useState({}); 
       const [dimensiTarget, setDimensiTarget] = useState([DIMENSI_P5[0], DIMENSI_P5[5], DIMENSI_P5[3]]);
       const [kkmConfig, setKkmConfig] = useState(INITIAL_KKM);
-      const [pengukuran, setPengukuran] = useState({});
 
       const [confirmDialog, setConfirmDialog] = useState(null);
 
@@ -563,7 +603,15 @@
         window.addEventListener('demo-toast', handleDemoToast);
 
         const fetchInitialData = async () => {
-          const activeYear = localStorage.getItem(LSK('activeTahunAjaran')) || '2025_2026_semester_1';
+          // Ambil daftar database (registry) dari cloud agar dropdown login selalu fresh
+          fetchDatabaseRegistry().catch(()=>{});
+          const activeYear = localStorage.getItem(LSK('activeTahunAjaran')) || '';
+          if (!activeYear) {
+             // Belum ada DB aktif → langsung tampilkan login tanpa fetch data
+             setLoadingProgress(100);
+             setTimeout(() => setIsAppLoading(false), 200);
+             return;
+          }
           const cacheKey = LSK(`eraaport_cache_${activeYear}`);
           
           // 1. Cek cache localStorage terlebih dahulu agar load instan
@@ -574,7 +622,12 @@
                 const json = JSON.parse(cached);
                 if (json && json.data) {
                    const d = json.data;
-                   if (d.profil) setProfilSekolah(d.profil);
+                   if (d.profil) {
+                      const _id = localStorage.getItem(LSK('activeTahunAjaran')) || '';
+                      const m = _id.match(/^(\d{4})_(\d{4})_semester_(\d+)$/);
+                      if (m) { d.profil.tahunAjaran = `${m[1]}/${m[2]}`; d.profil.semester = `${m[3]} (${m[3]==='1'?'SATU':'DUA'})`; }
+                      setProfilSekolah(d.profil);
+                   }
                    if (d.temaConfig) setTemaConfig(d.temaConfig);
                    if (d.appConfig) setAppConfig(d.appConfig);
                    if (d.guruProfil) setGuruProfil(d.guruProfil);
@@ -591,7 +644,6 @@
                    if (d.guruRombelConfig) setGuruRombelConfig(d.guruRombelConfig);
                    if (d.dimensiTarget) setDimensiTarget(d.dimensiTarget);
                    if (d.kkmConfig) setKkmConfig(d.kkmConfig);
-                   if (d.pengukuran) setPengukuran(d.pengukuran);
                    usedCache = true;
                    // Langsung 100% lalu masuk sistem
                    setLoadingProgress(100);
@@ -618,7 +670,12 @@
             const json = await res.json();
             
             if (json.status === 'success' && json.data) {
-              if (json.data.profil) setProfilSekolah(json.data.profil);
+              if (json.data.profil) {
+                 const _id = localStorage.getItem(LSK('activeTahunAjaran')) || '';
+                 const m = _id.match(/^(\d{4})_(\d{4})_semester_(\d+)$/);
+                 if (m) { json.data.profil.tahunAjaran = `${m[1]}/${m[2]}`; json.data.profil.semester = `${m[3]} (${m[3]==='1'?'SATU':'DUA'})`; }
+                 setProfilSekolah(json.data.profil);
+              }
               if (json.data.temaConfig) setTemaConfig(json.data.temaConfig);
               if (json.data.appConfig) setAppConfig(json.data.appConfig);
               if (json.data.guruProfil) setGuruProfil(json.data.guruProfil);
@@ -635,7 +692,6 @@
               if (json.data.guruRombelConfig) setGuruRombelConfig(json.data.guruRombelConfig);
               if (json.data.dimensiTarget) setDimensiTarget(json.data.dimensiTarget);
               if (json.data.kkmConfig) setKkmConfig(json.data.kkmConfig);
-              if (json.data.pengukuran) setPengukuran(json.data.pengukuran);
               // Simpan cache untuk load berikutnya
               try { localStorage.setItem(cacheKey, JSON.stringify(json)); } catch(_) {}
             }
@@ -761,7 +817,7 @@
         );
       }
 
-      const activeContext = { profil: profilSekolah, temaConfig, appConfig, guruProfil, teachers, mapel: mapelList, ekskul: ekskulList, allStudents, materiGuru, studentGrades, absensi, ekskulData, kokuData, guruMapelConfig, dimensiTarget, kkmConfig, pengukuran };
+      const activeContext = { profil: profilSekolah, temaConfig, appConfig, guruProfil, teachers, mapel: mapelList, ekskul: ekskulList, allStudents, materiGuru, studentGrades, absensi, ekskulData, kokuData, guruMapelConfig, dimensiTarget, kkmConfig };
 
       if (!user) return <LoginScreen onLogin={handleLogin} teachers={teachers} profil={profilSekolah} temaConfig={temaConfig} deferredPrompt={deferredPrompt} handleInstallApp={handleInstallApp} />;
 
@@ -773,9 +829,8 @@
             case 'master_mapel': return <AdminMasterMapel mapel={mapelList} setMapel={setMapelList} ekskul={ekskulList} setEkskul={setEkskulList} profil={profilSekolah} showToast={showToast} />;
             case 'kkm_nilai': return <AdminKKM kkmConfig={kkmConfig} setKkmConfig={setKkmConfig} profil={profilSekolah} showToast={showToast} />;
             case 'data_siswa': return <AdminDataSiswa allStudents={allStudents} setAllStudents={setAllStudents} profil={profilSekolah} showToast={showToast} teachers={teachers} />;
+            case 'manaj_db': return <AdminManajemenDatabase profil={profilSekolah} setProfil={setProfilSekolah} showToast={showToast} />;
             case 'profil': return <AdminProfil profil={profilSekolah} setProfil={setProfilSekolah} showToast={showToast} />;
-            case 'manaj_db': return <AdminManajemenDB showToast={showToast} />;
-            case 'tarik_semester': return <AdminTarikSemester activeContext={activeContext} setProfilSekolah={setProfilSekolah} setTeachers={setTeachers} setAllStudents={setAllStudents} setMapelList={setMapelList} setEkskulList={setEkskulList} setKkmConfig={setKkmConfig} showToast={showToast} showConfirm={showConfirm} />;
             case 'pengaturan_tema': return <AdminPengaturanTema temaConfig={temaConfig} setTemaConfig={setTemaConfig} profil={profilSekolah} showToast={showToast} />;
             case 'pengaturan_akses': return <AdminPengaturanAkses appConfig={appConfig} setAppConfig={setAppConfig} profil={profilSekolah} showToast={showToast} />;
             case 'progress_guru': return <AdminProgressGuru teachers={teachers} students={allStudents} mapelList={mapelList} studentGrades={studentGrades} materiGuru={materiGuru} calculateNA={calculateNA} />;
@@ -795,7 +850,6 @@
             case 'input_materi': return <GuruInputMateri mapelList={activeMapelList} materiGuru={materiGuru} setMateriGuru={setMateriGuru} profil={profilSekolah} showToast={showToast} isAppLocked={isAppLocked} appConfig={appConfig} selectedRombel={currentRombel} />;
            case 'input_nilai': return <GuruInputNilai mapelList={activeMapelList} materiGuru={materiGuru} studentGrades={studentGrades} setStudentGrades={setStudentGrades} students={students} calculateNA={calculateNA} profil={profilSekolah} showToast={showToast} showConfirm={showConfirm} isAppLocked={isAppLocked} appConfig={appConfig} selectedRombel={currentRombel} kkmConfig={kkmConfig} />;
             case 'input_absensi': return <GuruInputAbsensi students={students} absensi={absensi} setAbsensi={setAbsensi} profil={profilSekolah} showToast={showToast} showConfirm={showConfirm} isAppLocked={isAppLocked} appConfig={appConfig} />;
-            case 'input_pengukuran': return <GuruInputPengukuran students={students} pengukuran={pengukuran} setPengukuran={setPengukuran} profil={profilSekolah} waliKelasName={user.name} showToast={showToast} showConfirm={showConfirm} isAppLocked={isAppLocked} appConfig={appConfig} />;
             case 'input_ekskul': return <GuruInputEkskul students={students} ekskulList={ekskulList} ekskulData={ekskulData} setEkskulData={setEkskulData} profil={profilSekolah} showToast={showToast} showConfirm={showConfirm} isAppLocked={isAppLocked} appConfig={appConfig} />;
             case 'input_koku': return <GuruInputKoku students={students} kokuData={kokuData} setKokuData={setKokuData} dimensiTarget={dimensiTarget} setDimensiTarget={setDimensiTarget} profil={profilSekolah} showToast={showToast} showConfirm={showConfirm} isAppLocked={isAppLocked} appConfig={appConfig} />;
             case 'leger': return <GuruLeger students={students} mapelList={mapelList} calculateNA={calculateNA} profil={profilSekolah} waliKelasName={user.name} temaConfig={temaConfig} showToast={showToast} />;
@@ -812,9 +866,8 @@
         { id: 'master_mapel', label: 'Master Mapel & Ekskul', icon: <BookOpen /> },
         { id: 'kkm_nilai', label: 'KKM & Predikat', icon: <Settings /> },
         { id: 'data_siswa', label: 'Sinkron Siswa (CSV)', icon: <FileSpreadsheet /> },
-        { id: 'profil', label: 'Profil Sekolah', icon: <Building /> },
         { id: 'manaj_db', label: 'Manajemen Database', icon: <FileSpreadsheet /> },
-        { id: 'tarik_semester', label: 'Tarik Data Semester Lalu', icon: <Download /> },
+        { id: 'profil', label: 'Profil Sekolah', icon: <Building /> },
         { id: 'pengaturan_tema', label: 'Pengaturan Tema', icon: <Palette /> },
         { id: 'pengaturan_akses', label: 'Pengumuman & Akses', icon: <Bullhorn /> },
         { id: 'progress_guru', label: 'Progress Pengisian', icon: <PieChart /> },
@@ -831,7 +884,6 @@
         { id: 'input_materi', label: 'Input Deskripsi/TP', icon: <BookOpen /> },
         { id: 'input_nilai', label: 'Input Nilai Akademik', icon: <FileText /> },
         { id: 'input_absensi', label: 'Input Kehadiran', icon: <ClipboardList /> },
-        { id: 'input_pengukuran', label: 'Pengukuran Siswa', icon: <Activity /> },
         { id: 'input_ekskul', label: 'Nilai Ekstrakurikuler', icon: <Activity /> },
         { id: 'input_koku', label: 'Nilai Kokurikuler (P5)', icon: <Users /> },
         { id: 'leger', label: 'Cetak Leger Kelas', icon: <FileSpreadsheet /> },
@@ -916,6 +968,9 @@
                 <h1 className="text-lg font-bold text-slate-800 capitalize hidden sm:block tracking-tight">
                   {currentMenus.find(m => m.id === activeMenu)?.label}
                 </h1>
+                <span className="ml-2 sm:ml-4 px-2.5 sm:px-3 py-1 rounded-full bg-primaryLight text-primary text-[10px] sm:text-xs font-extrabold tracking-wide whitespace-nowrap shadow-sm border border-primary/20" title="Database aktif">
+                   T.A {profilSekolah.tahunAjaran || '—'} · Sem {String(profilSekolah.semester||'').match(/\d+/)?.[0] || '?'}
+                </span>
               </div>
               <div className="flex items-center gap-3 p-1.5 rounded-xl border border-transparent">
                 <div className="text-right hidden md:block">
@@ -961,58 +1016,24 @@
       const [error, setError] = useState('');
       const [imgError, setImgError] = useState(false);
       const [showIosHint, setShowIosHint] = useState(false);
-      // === Daftar database (Tahun Ajaran + Semester) yang ada lokal ===
-      // Format key: YYYY_YYYY_semester_S (contoh: 2025_2026_semester_1)
-      const knownDatabases = (() => {
-         const set = new Set();
-         const addKey = (k) => { if (/^\d{4}_\d{4}_semester_[12]$/.test(k)) set.add(k); };
-         try {
-            const arr = JSON.parse(localStorage.getItem(LSK('knownDatabases')) || '[]');
-            arr.forEach(addKey);
-         } catch(_) {}
-         try {
-            const old = JSON.parse(localStorage.getItem(LSK('knownYears')) || '[]');
-            old.forEach(y => { if (/^\d{4}\/\d{4}$/.test(y)) { const f = y.replace('/','_'); addKey(f+'_semester_1'); addKey(f+'_semester_2'); } });
-         } catch(_) {}
-         try {
-            const prefix = LSK('eraaport_cache_');
-            for (let i = 0; i < localStorage.length; i++) {
-               const k = localStorage.key(i);
-               if (k && k.startsWith(prefix)) {
-                  const tail = k.substring(prefix.length);
-                  if (/^\d{4}_\d{4}_semester_[12]$/.test(tail)) addKey(tail);
-                  else if (/^\d{4}_\d{4}$/.test(tail)) { addKey(tail+'_semester_1'); addKey(tail+'_semester_2'); }
-               }
-            }
-         } catch(_) {}
-         try {
-            const a = localStorage.getItem(LSK('activeTahunAjaran')) || '';
-            if (/^\d{4}_\d{4}_semester_[12]$/.test(a)) addKey(a);
-            else if (/^\d{4}_\d{4}$/.test(a)) { addKey(a+'_semester_1'); addKey(a+'_semester_2'); }
-         } catch(_) {}
-         const list = Array.from(set).sort();
-         try { localStorage.setItem(LSK('knownDatabases'), JSON.stringify(list)); } catch(_) {}
-         return list;
-      })();
-      const formatDb = (k) => { const m = k.match(/^(\d{4})_(\d{4})_semester_([12])$/); return m ? `${m[1]}/${m[2]} - Semester ${m[3]}` : k; };
-      const currentActive = (() => {
-         const a = localStorage.getItem(LSK('activeTahunAjaran')) || '';
-         if (/^\d{4}_\d{4}_semester_[12]$/.test(a)) return a;
-         if (/^\d{4}_\d{4}$/.test(a)) return a + '_semester_1';
-         return '';
-      })();
-      const [selDb, setSelDb] = useState(currentActive || (knownDatabases[0] || ''));
-      const [newYear, setNewYear] = useState('');
-      const [newSem, setNewSem] = useState('1');
-      const [showNewYear, setShowNewYear] = useState(knownDatabases.length === 0);
+      // === Daftar database (tahun & semester) yang sudah dibuat admin ===
+      const [knownDatabases, setKnownDatabases] = useState(() => getLocalDatabases());
+      const currentActiveId = localStorage.getItem(LSK('activeTahunAjaran')) || '';
+      const [selDbId, setSelDbId] = useState(currentActiveId || (knownDatabases[0]?.id || ''));
+      const [refreshingDb, setRefreshingDb] = useState(false);
 
-      const applyDb = (dbKey) => {
-         if (!dbKey) return;
-         localStorage.setItem(LSK('activeTahunAjaran'), dbKey);
-         try {
-            const arr = JSON.parse(localStorage.getItem(LSK('knownDatabases')) || '[]');
-            if (!arr.includes(dbKey)) { arr.push(dbKey); arr.sort(); localStorage.setItem(LSK('knownDatabases'), JSON.stringify(arr)); }
-         } catch(_) {}
+      useEffect(() => {
+         // refresh registry begitu login terbuka — biar dropdown selalu sinkron lintas perangkat
+         setRefreshingDb(true);
+         fetchDatabaseRegistry().then(list => {
+            setKnownDatabases(list);
+            if (!selDbId && list[0]) setSelDbId(list[0].id);
+         }).finally(() => setRefreshingDb(false));
+      }, []);
+
+      const applyDbId = (dbId) => {
+         if (!dbId) return;
+         localStorage.setItem(LSK('activeTahunAjaran'), dbId);
       };
 
       // Deteksi iOS / Safari (iOS tidak support beforeinstallprompt)
@@ -1036,22 +1057,21 @@
 
       const handleSubmit = (e) => {
         e.preventDefault();
-        // Pilih / buat database (tahun ajaran + semester) sebelum login
-        let newActive = '';
-        if (showNewYear) {
-           const y = newYear.trim();
-           if (!/^\d{4}\/\d{4}$/.test(y)) { setError('Tahun ajaran tidak valid. Format: 2025/2026'); return; }
-           newActive = y.replace('/','_') + '_semester_' + newSem;
-        } else {
-           newActive = selDb;
+        // Admin boleh login walau registry kosong (untuk bootstrap database baru)
+        const isAdminLogin = (username.toLowerCase() === 'admin' || username.toLowerCase() === 'demo_admin' || username.toLowerCase() === 'demo_guru');
+        if (knownDatabases.length === 0 && !isAdminLogin) {
+           setError('Belum ada database. Hubungi Admin untuk membuat database lewat menu Manajemen Database.');
+           return;
         }
-        if (!/^\d{4}_\d{4}_semester_[12]$/.test(newActive)) {
-           setError('Pilih database (tahun ajaran & semester) terlebih dahulu.');
+        const finalDbId = selDbId || (knownDatabases[0]?.id || '');
+        if (!finalDbId && !isAdminLogin) {
+           setError('Pilih database (Tahun Ajaran & Semester) terlebih dahulu.');
            return;
         }
         const prevActive = (localStorage.getItem(LSK('activeTahunAjaran')) || '');
-        applyDb(newActive);
-        if (prevActive && prevActive !== newActive) {
+        if (finalDbId) applyDbId(finalDbId);
+        // Jika user pindah database, reload supaya data dimuat ulang
+        if (prevActive && finalDbId && prevActive !== finalDbId) {
            window.location.reload();
            return;
         }
@@ -1105,28 +1125,20 @@
             {error && <div className="bg-red-50 text-red-600 font-bold text-sm p-4 rounded-xl mb-6 text-center border border-red-100">{error}</div>}
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-2">
-                <label className="block text-[10px] font-extrabold text-slate-500 uppercase tracking-wider">Database Sekolah (Tahun Ajaran & Semester)</label>
-                {!showNewYear && knownDatabases.length > 0 && (
-                  <div className="flex gap-2">
-                    <select value={selDb} onChange={e => setSelDb(e.target.value)} className="flex-1 p-2.5 bg-white border border-slate-200 rounded-lg font-bold text-sm focus:ring-2 focus:ring-primary outline-none">
-                      {knownDatabases.map(k => <option key={k} value={k}>{formatDb(k)}</option>)}
-                    </select>
-                    <button type="button" onClick={() => setShowNewYear(true)} className="px-3 py-2 bg-primary text-white rounded-lg text-xs font-bold shadow-sm" title="Buat database baru">+ Baru</button>
+                <label className="block text-[10px] font-extrabold text-slate-500 uppercase tracking-wider flex items-center justify-between">
+                   <span>Database (Tahun Ajaran & Semester)</span>
+                   {refreshingDb && <span className="text-[9px] font-bold text-primary normal-case">memuat…</span>}
+                </label>
+                {knownDatabases.length > 0 ? (
+                  <select value={selDbId} onChange={e => setSelDbId(e.target.value)} className="w-full p-2.5 bg-white border border-slate-200 rounded-lg font-bold text-sm focus:ring-2 focus:ring-primary outline-none">
+                    {knownDatabases.map(d => <option key={d.id} value={d.id}>{d.label || labelDb(d.tahun, d.semester)}</option>)}
+                  </select>
+                ) : (
+                  <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-lg text-[11px] text-amber-800 font-semibold leading-snug">
+                    Belum ada database. Login sebagai <b>admin</b> lalu buat di menu <b>Manajemen Database</b>.
                   </div>
                 )}
-                {showNewYear && (
-                  <div className="flex gap-2 flex-wrap">
-                    <input type="text" value={newYear} onChange={e => setNewYear(e.target.value)} placeholder="cth: 2026/2027" className="flex-1 min-w-[140px] p-2.5 bg-white border border-slate-200 rounded-lg font-bold text-sm focus:ring-2 focus:ring-primary outline-none text-center" />
-                    <select value={newSem} onChange={e => setNewSem(e.target.value)} className="p-2.5 bg-white border border-slate-200 rounded-lg font-bold text-sm focus:ring-2 focus:ring-primary outline-none">
-                      <option value="1">Semester 1</option>
-                      <option value="2">Semester 2</option>
-                    </select>
-                    {knownDatabases.length > 0 && (
-                      <button type="button" onClick={() => setShowNewYear(false)} className="px-3 py-2 bg-slate-200 text-slate-700 rounded-lg text-xs font-bold">Batal</button>
-                    )}
-                  </div>
-                )}
-                <p className="text-[10px] text-slate-500 leading-tight">{knownDatabases.length === 0 ? 'Belum ada database. Masukkan tahun ajaran & pilih semester untuk mulai.' : 'Pilih database, atau klik "+ Baru" untuk database baru (per semester).'}</p>
+                <p className="text-[10px] text-slate-500 leading-tight">Daftar diambil otomatis dari server sekolah. Untuk membuat database baru, login admin → Manajemen Database.</p>
               </div>
               <input type="text" className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl font-medium focus:ring-2 focus:ring-primary outline-none transition-all text-center" placeholder="Masukkan Username Anda" value={username} onChange={e=>setUsername(e.target.value)} data-testid="login-username-input"/>
               <button type="submit" className="w-full bg-primary hover:bg-primaryHover text-white font-bold py-4 rounded-xl shadow-lg transition-all active:scale-[0.98]" data-testid="login-submit-btn">Masuk Aplikasi</button>
@@ -1970,6 +1982,115 @@
       );
     }
 
+    function AdminManajemenDatabase({ profil, setProfil, showToast }) {
+       const [list, setList] = useState(() => getLocalDatabases());
+       const [loading, setLoading] = useState(false);
+       const [tahun, setTahun] = useState('');
+       const [semester, setSemester] = useState('1');
+       const activeId = localStorage.getItem(LSK('activeTahunAjaran')) || '';
+
+       const refresh = async () => {
+          setLoading(true);
+          try { const fresh = await fetchDatabaseRegistry(); setList(fresh); }
+          finally { setLoading(false); }
+       };
+       useEffect(() => { refresh(); }, []);
+
+       const handleCreate = async () => {
+          if (!/^\d{4}\/\d{4}$/.test(tahun.trim())) {
+             showToast('Format Tahun Ajaran salah. Contoh: 2025/2026'); return;
+          }
+          const id = fmtDbId(tahun.trim(), semester);
+          if (list.some(d => d.id === id)) { showToast('Database ini sudah ada.'); return; }
+          const next = [...list, { id, tahun: tahun.trim(), semester: `${semester} (${semester==='1'?'SATU':'DUA'})`, label: labelDb(tahun.trim(), semester), createdAt: new Date().toISOString() }]
+             .sort((a,b)=>a.id.localeCompare(b.id));
+          setLoading(true);
+          await saveDatabaseRegistry(next);
+          setList(next);
+          setLoading(false);
+          setTahun(''); setSemester('1');
+          showToast('Database baru dibuat dan tersedia di dropdown login (semua perangkat).');
+       };
+
+       const handleDelete = async (id) => {
+          if (!window.confirm('Hapus entri database "'+id+'" dari registry?\n\nCATATAN: Data nilai/siswa di server TIDAK ikut terhapus, hanya hilang dari daftar pilihan.')) return;
+          const next = list.filter(d => d.id !== id);
+          setLoading(true);
+          await saveDatabaseRegistry(next);
+          setList(next);
+          setLoading(false);
+          showToast('Entri database dihapus dari registry.');
+       };
+
+       const handleSwitch = (db) => {
+          if (!window.confirm('Pindah ke database:\n'+db.label+'\n\nHalaman akan dimuat ulang.')) return;
+          localStorage.setItem(LSK('activeTahunAjaran'), db.id);
+          // Update profil agar tahun ajaran & semester terlihat segera saat reload
+          window.location.reload();
+       };
+
+       return (
+          <div className="space-y-6 max-w-5xl">
+             <div className="bg-white/90 backdrop-blur-sm p-6 sm:p-8 rounded-[2rem] border border-slate-100 shadow-sm">
+                <h2 className="font-extrabold text-xl sm:text-2xl text-slate-800 mb-1">Manajemen Database</h2>
+                <p className="text-slate-500 font-medium text-xs sm:text-sm mb-6">Buat dan kelola database per <b>Tahun Ajaran &amp; Semester</b>. Daftar ini langsung muncul di dropdown login pada semua perangkat.</p>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-6">
+                   <div>
+                      <label className="block text-xs font-bold text-slate-600 mb-1">Tahun Ajaran</label>
+                      <input value={tahun} onChange={e=>setTahun(e.target.value)} placeholder="cth: 2025/2026" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-sm outline-none focus:ring-2 focus:ring-primary" />
+                   </div>
+                   <div>
+                      <label className="block text-xs font-bold text-slate-600 mb-1">Semester</label>
+                      <select value={semester} onChange={e=>setSemester(e.target.value)} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-sm outline-none focus:ring-2 focus:ring-primary">
+                         <option value="1">1 (SATU) / Ganjil</option>
+                         <option value="2">2 (DUA) / Genap</option>
+                      </select>
+                   </div>
+                   <div className="flex items-end">
+                      <button onClick={handleCreate} disabled={loading} className="w-full bg-primary hover:bg-primaryHover text-white px-5 py-3 rounded-xl font-bold shadow-md disabled:opacity-60">+ Buat Database</button>
+                   </div>
+                </div>
+
+                <div className="flex items-center justify-between mb-3">
+                   <h3 className="font-extrabold text-slate-800">Daftar Database</h3>
+                   <button onClick={refresh} disabled={loading} className="text-xs font-bold text-primary hover:underline">{loading?'Memuat…':'Refresh'}</button>
+                </div>
+                <div className="overflow-x-auto border border-slate-200 rounded-xl">
+                   <table className="w-full text-sm">
+                      <thead className="bg-slate-50">
+                         <tr>
+                            <th className="text-left p-3 font-bold text-slate-700">Tahun Ajaran</th>
+                            <th className="text-left p-3 font-bold text-slate-700">Semester</th>
+                            <th className="text-left p-3 font-bold text-slate-700">ID Database</th>
+                            <th className="text-left p-3 font-bold text-slate-700">Status</th>
+                            <th className="text-right p-3 font-bold text-slate-700">Aksi</th>
+                         </tr>
+                      </thead>
+                      <tbody>
+                         {list.length === 0 && (
+                            <tr><td colSpan="5" className="p-6 text-center text-slate-400 font-medium">Belum ada database. Buat di form atas.</td></tr>
+                         )}
+                         {list.map(d => (
+                            <tr key={d.id} className="border-t border-slate-100">
+                               <td className="p-3 font-bold">{d.tahun}</td>
+                               <td className="p-3">{d.semester}</td>
+                               <td className="p-3 font-mono text-xs text-slate-500">{d.id}</td>
+                               <td className="p-3">{d.id === activeId ? <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-xs font-bold">AKTIF</span> : <span className="text-xs text-slate-400">—</span>}</td>
+                               <td className="p-3 text-right space-x-2 whitespace-nowrap">
+                                  {d.id !== activeId && <button onClick={()=>handleSwitch(d)} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg">Aktifkan</button>}
+                                  <button onClick={()=>handleDelete(d.id)} className="px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 text-xs font-bold rounded-lg">Hapus</button>
+                               </td>
+                            </tr>
+                         ))}
+                      </tbody>
+                   </table>
+                </div>
+             </div>
+          </div>
+       );
+    }
+
     function AdminProfil({ profil, setProfil, showToast }) {
       const fields = [
         { key: 'namaSekolah', label: 'Nama Sekolah', type: 'text' },
@@ -1977,8 +2098,8 @@
         { key: 'npsn', label: 'NPSN', type: 'text' },
         { key: 'kepalaSekolah', label: 'Nama Kepala Sekolah', type: 'text' },
         { key: 'nip', label: 'NIP Kepala Sekolah', type: 'text' },
-        { key: 'semester', label: 'Semester', type: 'text' },
-        { key: 'tahunAjaran', label: 'Tahun Ajaran', type: 'text' },
+        { key: 'semester', label: 'Semester (mengikuti database aktif)', type: 'text', readOnly: true },
+        { key: 'tahunAjaran', label: 'Tahun Ajaran (mengikuti database aktif)', type: 'text', readOnly: true },
         { key: 'tanggalRaport', label: 'Tanggal Raport (otomatis tercetak di TTD)', type: 'date' },
         { key: 'kecamatan', label: 'Kecamatan di Raport (Otomatis dipakai untuk Titimangsa TTD)', type: 'text' },
         { key: 'alamat', label: 'Alamat Sekolah', type: 'textarea' },
@@ -1986,18 +2107,8 @@
       ];
 
       const handleSave = () => {
-        const ay = profil.tahunAjaran.replace(/\//g, '_').replace(/ /g, '');
-        localStorage.setItem(LSK('activeTahunAjaran'), ay);
-        // Catat tahun ajaran yang pernah dipakai sekolah ini agar muncul di dropdown login
-        try {
-           const raw = localStorage.getItem(LSK('knownYears')) || '[]';
-           const arr = JSON.parse(raw);
-           if (profil.tahunAjaran && !arr.includes(profil.tahunAjaran)) {
-              arr.push(profil.tahunAjaran);
-              arr.sort();
-              localStorage.setItem(LSK('knownYears'), JSON.stringify(arr));
-           }
-        } catch(_) {}
+        // CATATAN: Simpan profil TIDAK membuat database baru.
+        // Database hanya bisa dibuat lewat menu Manajemen Database.
         syncToCloud('profil', profil, profil.tahunAjaran);
         showToast('Profil Sekolah Berhasil Disimpan ke Database!');
       };
@@ -2020,7 +2131,7 @@
                 {f.type === 'textarea' ? (
                   <textarea className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm font-medium outline-none focus:ring-2 focus:ring-primary" rows="3" value={profil[f.key] || ''} onChange={e=>setProfil({...profil, [f.key]: e.target.value})} />
                 ) : (
-                  <input type="text" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm font-medium outline-none focus:ring-2 focus:ring-primary" value={profil[f.key] || ''} onChange={e=>setProfil({...profil, [f.key]: e.target.value})} />
+                  <input type={f.type==='date'?'date':'text'} readOnly={!!f.readOnly} className={`w-full p-3 border rounded-xl text-xs sm:text-sm font-medium outline-none focus:ring-2 focus:ring-primary ${f.readOnly?'bg-slate-100 border-slate-300 text-slate-600 cursor-not-allowed':'bg-slate-50 border-slate-200'}`} value={profil[f.key] || ''} onChange={e=> { if(f.readOnly) return; setProfil({...profil, [f.key]: e.target.value}); }} />
                 )}
               </div>
             ))}
@@ -2250,61 +2361,9 @@
     }
 
     function AdminPrintFilter({ defaultContext, renderComponent, showToast }) {
-      const generateYears = () => {
-        const startYear = 2021;
-        return Array.from({length: 15}, (_, i) => `${startYear+i}/${startYear+i+1}`);
-      };
-
-      const [filterTahun, setFilterTahun] = useState(defaultContext.profil.tahunAjaran || '2024/2025');
-      const [filterSemester, setFilterSemester] = useState(defaultContext.profil.semester || '1 (SATU)');
       const [rombel, setRombel] = useState('');
-      const [isLoading, setIsLoading] = useState(false);
-      const [hData, setHData] = useState(null);
-
-      const yearOptions = generateYears();
-
-      const ctx = hData ? {
-         profil: hData.profil || INITIAL_PROFIL,
-         temaConfig: hData.temaConfig || INITIAL_TEMA,
-         teachers: hData.teachers || [],
-         mapel: hData.mapel || [],
-         ekskul: hData.ekskul || [],
-         allStudents: hData.allStudents || [],
-         materiGuru: hData.materiGuru || {},
-         studentGrades: hData.studentGrades || {},
-         absensi: hData.absensi || {},
-         ekskulData: hData.ekskulData || {},
-         kokuData: hData.kokuData || {},
-         dimensiTarget: hData.dimensiTarget || DIMENSI_P5,
-         kkmConfig: hData.kkmConfig || INITIAL_KKM
-      } : defaultContext;
-
-      const handleLoadData = async () => {
-         setIsLoading(true);
-         setRombel(''); 
-         try {
-            const activeYear = filterTahun.replace(/\//g, '_').replace(/ /g, '');
-            const res = await fetch(GAS_URL, {
-              method: 'POST',
-              headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-              body: JSON.stringify({ action: 'loadAll', tahunAjaran: `Tahun_${activeYear}` })
-            });
-            const json = await res.json();
-            if (json.status === 'success' && json.data && Object.keys(json.data).length > 0) {
-               setHData(json.data);
-               showToast(`Berhasil menarik data historis (Kepsek, Guru, Nilai) untuk T.A ${filterTahun}`);
-            } else {
-               showToast(`Data belum ada/kosong untuk Tahun Ajaran ${filterTahun}. Sistem akan menampilkan data saat ini.`);
-               setHData(null);
-            }
-         } catch (e) {
-            showToast('Gagal menghubungi server database.');
-         } finally {
-            setIsLoading(false);
-         }
-      };
-
-      const printProfil = { ...ctx.profil, semester: filterSemester, tahunAjaran: filterTahun };
+      const ctx = defaultContext;
+      const printProfil = ctx.profil;
       const rombelOptions = [...new Set(ctx.allStudents.map(s => s.rombelSD))].filter(r => r && r !== '-');
       const filteredStudents = ctx.allStudents.filter(s => s.rombelSD === rombel);
       const waliKelas = ctx.teachers.find(t => t.waliKelas === rombel);
@@ -2313,31 +2372,11 @@
       return (
         <div className="space-y-6">
           <div className="bg-white/90 backdrop-blur-sm p-6 sm:p-8 rounded-[2rem] border border-slate-100 shadow-sm">
-            <h2 className="font-extrabold text-lg sm:text-xl text-slate-800 mb-2">Filter Data Cetak Global (Historis)</h2>
-            <p className="text-slate-500 font-medium text-xs sm:text-sm mb-4 sm:mb-6">Ubah Tahun Ajaran dan Semester lalu klik "Tarik Data Historis" untuk melihat rekaman arsip nilai masa lalu secara utuh.</p>
-            
-            <div className="flex flex-col md:flex-row gap-3 sm:gap-4 mb-4 sm:mb-6">
-              <div className="flex-1">
-                 <label className="text-[10px] sm:text-xs font-bold text-slate-500 mb-1 sm:mb-2 block">Tahun Ajaran</label>
-                 <select className="w-full p-3 sm:p-4 border border-slate-200 rounded-xl sm:rounded-2xl outline-none focus:ring-2 focus:ring-primary font-bold text-slate-700 bg-slate-50 text-xs sm:text-sm" value={filterTahun} onChange={e=>setFilterTahun(e.target.value)}>
-                    {yearOptions.map(y => <option key={y} value={y}>{y}</option>)}
-                 </select>
-              </div>
-              <div className="flex-1">
-                 <label className="text-[10px] sm:text-xs font-bold text-slate-500 mb-1 sm:mb-2 block">Semester</label>
-                 <select className="w-full p-3 sm:p-4 border border-slate-200 rounded-xl sm:rounded-2xl outline-none focus:ring-2 focus:ring-primary font-bold text-slate-700 bg-slate-50 text-xs sm:text-sm" value={filterSemester} onChange={e=>setFilterSemester(e.target.value)}>
-                    <option value="1 (SATU)">1 (SATU) / Ganjil</option>
-                    <option value="2 (DUA)">2 (DUA) / Genap</option>
-                 </select>
-              </div>
-              <div className="flex items-end">
-                 <button onClick={handleLoadData} disabled={isLoading} className="bg-blue-600 hover:bg-blue-700 text-white px-6 sm:px-8 py-3 sm:py-4 rounded-xl sm:rounded-2xl text-xs sm:text-sm font-bold shadow-md flex items-center justify-center gap-2 w-full md:w-auto transition-all disabled:opacity-70 h-[46px] sm:h-[56px]">
-                    {isLoading ? <RefreshCw className="animate-spin"/> : <Search />}
-                    Tarik Historis
-                 </button>
-              </div>
-            </div>
-
+            <h2 className="font-extrabold text-lg sm:text-xl text-slate-800 mb-2">Cetak Global — Database Aktif</h2>
+            <p className="text-slate-500 font-medium text-xs sm:text-sm mb-4 sm:mb-6">
+               Data otomatis diambil dari database aktif: <b className="text-primary">Tahun Ajaran {ctx.profil.tahunAjaran} — Semester {ctx.profil.semester}</b>.
+               Untuk cetak periode lain, ganti database lewat halaman <b>Login</b> atau menu <b>Manajemen Database</b>.
+            </p>
             <div className="border-t border-slate-100 pt-4 sm:pt-6 flex flex-col sm:flex-row items-start sm:items-center gap-3 sm:gap-4">
               <span className="font-extrabold text-slate-800 shrink-0 text-xs sm:text-sm">Pilih Kelas / Rombel :</span>
               <select className="w-full sm:w-auto p-3 sm:p-4 border border-slate-200 rounded-xl sm:rounded-2xl outline-none focus:ring-2 focus:ring-primary font-bold text-slate-700 bg-primaryLight text-primaryHover text-xs sm:text-sm" value={rombel} onChange={e=>setRombel(e.target.value)}>
@@ -2624,7 +2663,6 @@
                 <button onClick={() => setActiveTab('juara_kelas')} className={`flex-1 py-3 px-4 rounded-xl font-bold text-xs sm:text-sm transition-all ${activeTab === 'juara_kelas' ? 'bg-white shadow text-primary' : 'text-slate-500 hover:bg-slate-100'}`}><Trophy className="mr-2"/> Juara Kelas</button>
                 <button onClick={() => setActiveTab('juara_umum')} className={`flex-1 py-3 px-4 rounded-xl font-bold text-xs sm:text-sm transition-all ${activeTab === 'juara_umum' ? 'bg-white shadow text-amber-600' : 'text-slate-500 hover:bg-slate-100'}`}><GraduationCap className="mr-2"/> Juara Umum (Paralel)</button>
                 <button onClick={() => setActiveTab('tanda_tangan')} className={`flex-1 py-3 px-4 rounded-xl font-bold text-xs sm:text-sm transition-all ${activeTab === 'tanda_tangan' ? 'bg-white shadow text-blue-600' : 'text-slate-500 hover:bg-slate-100'}`}><Signature className="mr-2"/> Form Ambil Rapor</button>
-                <button onClick={() => setActiveTab('pengukuran')} className={`flex-1 py-3 px-4 rounded-xl font-bold text-xs sm:text-sm transition-all ${activeTab === 'pengukuran' ? 'bg-white shadow text-pink-600' : 'text-slate-500 hover:bg-slate-100'}`}><Activity className="mr-2"/> Pengukuran</button>
              </div>
 
              {(activeTab === 'juara_kelas' || activeTab === 'tanda_tangan') && (
@@ -2642,10 +2680,6 @@
                       <Printer /> {activeTab === 'juara_kelas' ? 'Buka & Cetak Juara Kelas' : 'Buka & Cetak Form Rapor'}
                    </button>
                 </div>
-             )}
-
-             {activeTab === 'pengukuran' && (
-                <AdminCetakPengukuranTab activeContext={activeContext} showToast={showToast} rombelOptions={rombelOptions} />
              )}
 
              {activeTab === 'juara_umum' && (
@@ -2673,256 +2707,6 @@
                    </button>
                 </div>
              )}
-          </div>
-       );
-    }
-
-
-    // ===== ADMIN: MANAJEMEN DATABASE =====
-    function AdminManajemenDB({ showToast }) {
-       const readDbs = () => { try { return JSON.parse(localStorage.getItem(LSK('knownDatabases')) || '[]'); } catch(_) { return []; } };
-       const [dbs, setDbs] = useState(readDbs());
-       const active = localStorage.getItem(LSK('activeTahunAjaran')) || '';
-       const [year, setYear] = useState('');
-       const [sem, setSem] = useState('1');
-       const fmt = (k) => { const m = k.match(/^(\d{4})_(\d{4})_semester_([12])$/); return m ? `${m[1]}/${m[2]} - Semester ${m[3]}` : k; };
-       const refresh = () => setDbs(readDbs());
-       const addDb = () => {
-          if (!/^\d{4}\/\d{4}$/.test(year.trim())) { showToast('Format salah. Contoh: 2026/2027'); return; }
-          const key = year.trim().replace('/','_') + '_semester_' + sem;
-          const arr = readDbs();
-          if (arr.includes(key)) { showToast('Database sudah ada.'); return; }
-          arr.push(key); arr.sort();
-          localStorage.setItem(LSK('knownDatabases'), JSON.stringify(arr));
-          showToast('Database baru: ' + fmt(key));
-          setYear(''); refresh();
-       };
-       const switchDb = (k) => {
-          if (k === active) return;
-          if (!confirm('Pindah ke database: ' + fmt(k) + '? Halaman akan reload.')) return;
-          localStorage.setItem(LSK('activeTahunAjaran'), k);
-          window.location.reload();
-       };
-       const removeDb = (k) => {
-          if (k === active) { showToast('Tidak bisa hapus database aktif.'); return; }
-          if (!confirm('Hapus ' + fmt(k) + ' dari daftar?')) return;
-          localStorage.setItem(LSK('knownDatabases'), JSON.stringify(readDbs().filter(x=>x!==k)));
-          try { localStorage.removeItem(LSK('eraaport_cache_' + k)); } catch(_) {}
-          refresh();
-       };
-       return (
-          <div className="bg-white/90 backdrop-blur-sm p-6 sm:p-8 rounded-[2rem] shadow-sm border border-slate-100 max-w-3xl space-y-6">
-             <div className="flex items-center gap-4 border-b border-slate-100 pb-4">
-                <div className="w-12 h-12 bg-primaryLight text-primary rounded-xl flex items-center justify-center shrink-0"><FileSpreadsheet className="text-2xl" /></div>
-                <div>
-                   <h2 className="font-extrabold text-xl sm:text-2xl text-slate-800">Manajemen Database</h2>
-                   <p className="text-slate-500 font-medium text-xs sm:text-sm">Buat database baru per Tahun Ajaran & Semester. Akan muncul di dropdown login.</p>
-                </div>
-             </div>
-             <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5">
-                <h3 className="font-bold text-slate-800 mb-3 text-sm">+ Buat Database Baru</h3>
-                <div className="flex flex-wrap gap-2">
-                   <input value={year} onChange={e=>setYear(e.target.value)} placeholder="cth: 2026/2027" className="flex-1 min-w-[140px] p-3 border border-slate-300 rounded-lg font-bold text-sm outline-none focus:ring-2 focus:ring-primary text-center" />
-                   <select value={sem} onChange={e=>setSem(e.target.value)} className="p-3 border border-slate-300 rounded-lg font-bold text-sm outline-none focus:ring-2 focus:ring-primary">
-                      <option value="1">Semester 1</option>
-                      <option value="2">Semester 2</option>
-                   </select>
-                   <button onClick={addDb} className="px-5 py-3 bg-primary text-white rounded-lg font-bold text-sm shadow-md">Tambah</button>
-                </div>
-             </div>
-             <div>
-                <h3 className="font-bold text-slate-800 mb-3 text-sm">Daftar Database</h3>
-                {dbs.length === 0 ? <p className="text-xs text-slate-500 italic">Belum ada database tersimpan.</p> : (
-                   <div className="space-y-2">
-                      {dbs.map(k => (
-                         <div key={k} className={`flex items-center justify-between p-3 rounded-xl border ${k===active ? 'bg-primaryLight/40 border-primary' : 'bg-white border-slate-200'}`}>
-                            <div>
-                               <div className="font-bold text-sm text-slate-800">{fmt(k)}</div>
-                               <div className="text-[10px] text-slate-500 font-mono">Tahun_{k}</div>
-                            </div>
-                            <div className="flex gap-2">
-                               {k===active ? <span className="px-3 py-1.5 bg-primary text-white rounded-lg text-xs font-bold">AKTIF</span> :
-                                  <button onClick={()=>switchDb(k)} className="px-3 py-1.5 bg-blue-50 text-blue-600 rounded-lg text-xs font-bold hover:bg-blue-100">Pindah</button>}
-                               <button onClick={()=>removeDb(k)} className="px-3 py-1.5 bg-red-50 text-red-600 rounded-lg text-xs font-bold hover:bg-red-100"><Trash2 /></button>
-                            </div>
-                         </div>
-                      ))}
-                   </div>
-                )}
-             </div>
-          </div>
-       );
-    }
-
-    // ===== ADMIN: TARIK DATA SEMESTER LALU =====
-    function AdminTarikSemester({ activeContext, setProfilSekolah, setTeachers, setAllStudents, setMapelList, setEkskulList, setKkmConfig, showToast, showConfirm }) {
-       const activeKey = localStorage.getItem(LSK('activeTahunAjaran')) || '';
-       const fmt = (k) => { const m = k.match(/^(\d{4})_(\d{4})_semester_([12])$/); return m ? `${m[1]}/${m[2]} - Sem ${m[3]}` : k; };
-       const allDbs = (() => { try { return JSON.parse(localStorage.getItem(LSK('knownDatabases')) || '[]').filter(x=>x!==activeKey); } catch(_) { return []; } })();
-       const [src, setSrc] = useState(allDbs[0] || '');
-       const [opts, setOpts] = useState({ profil:false, teachers:true, allStudents:true, kkmConfig:true, mapel:true, ekskul:true });
-       const [loading, setLoading] = useState(false);
-       const toggle = (k) => setOpts(p => ({...p, [k]: !p[k]}));
-       const labels = { profil:'Profil Sekolah', teachers:'Data Guru', allStudents:'Data Siswa', kkmConfig:'KKM & Predikat', mapel:'Master Mata Pelajaran', ekskul:'Master Ekstrakurikuler' };
-       const handleTarik = async () => {
-          if (!src) { showToast('Pilih database sumber.'); return; }
-          const chosen = Object.keys(opts).filter(k => opts[k]);
-          if (chosen.length === 0) { showToast('Pilih minimal satu kategori.'); return; }
-          showConfirm(`Tarik data (${chosen.length} kategori) dari ${fmt(src)} ke ${fmt(activeKey)}? Data lama akan ditimpa.`, async () => {
-             setLoading(true);
-             try {
-                const res = await fetch(GAS_URL, { method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body: JSON.stringify({ action:'loadAll', tahunAjaran: 'Tahun_'+src }) });
-                const json = await res.json();
-                if (json.status !== 'success' || !json.data) { showToast('Gagal mengambil data sumber.'); setLoading(false); return; }
-                const d = json.data;
-                const setters = { profil:setProfilSekolah, teachers:setTeachers, allStudents:setAllStudents, kkmConfig:setKkmConfig, mapel:setMapelList, ekskul:setEkskulList };
-                let count = 0;
-                for (const k of chosen) {
-                   if (d[k] !== undefined && d[k] !== null) {
-                      setters[k](d[k]);
-                      await syncToCloud(k, d[k], '');
-                      count++;
-                   }
-                }
-                showToast(`Berhasil tarik ${count} kategori. Data sudah masuk ke database aktif.`);
-             } catch(e) { showToast('Gagal: '+ e.message); }
-             setLoading(false);
-          });
-       };
-       return (
-          <div className="bg-white/90 backdrop-blur-sm p-6 sm:p-8 rounded-[2rem] shadow-sm border border-slate-100 max-w-3xl space-y-6">
-             <div className="flex items-center gap-4 border-b border-slate-100 pb-4">
-                <div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center shrink-0"><Download className="text-2xl" /></div>
-                <div>
-                   <h2 className="font-extrabold text-xl sm:text-2xl text-slate-800">Tarik Data Semester Sebelumnya</h2>
-                   <p className="text-slate-500 font-medium text-xs sm:text-sm">Salin <b>siswa, guru, profil, KKM, mapel</b> dari database lain ke database aktif. <b>Nilai TIDAK ikut tertarik.</b></p>
-                </div>
-             </div>
-             <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5 space-y-4">
-                <div>
-                   <label className="block text-[11px] font-extrabold text-slate-500 uppercase tracking-wider mb-2">Database Sumber</label>
-                   {allDbs.length === 0 ? <p className="text-xs text-red-500 font-bold">Tidak ada database lain. Buat database lain dulu di "Manajemen Database".</p> : (
-                      <select value={src} onChange={e=>setSrc(e.target.value)} className="w-full p-3 border border-slate-300 rounded-lg font-bold text-sm outline-none focus:ring-2 focus:ring-primary">
-                         {allDbs.map(k => <option key={k} value={k}>{fmt(k)}</option>)}
-                      </select>
-                   )}
-                   <p className="text-[11px] text-slate-500 mt-1">Database tujuan (aktif): <b>{fmt(activeKey) || '-'}</b></p>
-                </div>
-                <div>
-                   <label className="block text-[11px] font-extrabold text-slate-500 uppercase tracking-wider mb-2">Pilih Data</label>
-                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      {Object.keys(labels).map(k => (
-                         <label key={k} className={`flex items-center gap-2 p-3 rounded-lg border cursor-pointer ${opts[k] ? 'bg-primaryLight/40 border-primary' : 'bg-white border-slate-200'}`}>
-                            <input type="checkbox" checked={opts[k]} onChange={()=>toggle(k)} className="w-4 h-4" />
-                            <span className="font-bold text-sm text-slate-700">{labels[k]}</span>
-                         </label>
-                      ))}
-                   </div>
-                </div>
-                <button onClick={handleTarik} disabled={loading || allDbs.length===0} className="w-full py-3 bg-primary hover:bg-primaryHover text-white rounded-xl font-bold shadow-md disabled:opacity-50 flex items-center justify-center gap-2">
-                   <Download /> {loading ? 'Menarik data...' : 'Tarik Data Sekarang'}
-                </button>
-             </div>
-          </div>
-       );
-    }
-
-    // ===== ADMIN: CETAK PENGUKURAN TAB =====
-    function AdminCetakPengukuranTab({ activeContext, showToast, rombelOptions }) {
-       const [rombel, setRombel] = useState('');
-       const [search, setSearch] = useState('');
-       const peng = activeContext.pengukuran || {};
-       const profil = activeContext.profil || {};
-       const allStudents = activeContext.allStudents || [];
-       const tgl = profil.tanggalRaport ? new Date(profil.tanggalRaport).toLocaleDateString('id-ID', {day:'numeric',month:'long',year:'numeric'}) : '............................';
-       const filtered = allStudents.filter(s => {
-          if (rombel && rombel !== 'ALL' && s.rombelSD !== rombel) return false;
-          if (search && !s.nama.toLowerCase().includes(search.toLowerCase())) return false;
-          return true;
-       });
-       const handleCetak = () => {
-          if (filtered.length === 0) { showToast('Tidak ada siswa untuk dicetak.'); return; }
-          const groups = {};
-          filtered.forEach(s => { (groups[s.rombelSD] = groups[s.rombelSD] || []).push(s); });
-          let allHtml = ''; let idx = 0;
-          Object.keys(groups).sort().forEach(r => {
-             const list = groups[r];
-             const w = activeContext.teachers.find(t => t.waliKelas === r);
-             const waliName = w ? w.nama : '............................';
-             const rows = list.map((s, i) => {
-                const d = peng[s.id] || {};
-                return `<tr>
-                  <td class="border border-black p-2 text-center">${i+1}</td>
-                  <td class="border border-black p-2 font-bold uppercase">${s.nama}</td>
-                  <td class="border border-black p-2 text-center">${s.nisn||'-'}</td>
-                  <td class="border border-black p-2 text-center">${d.bb!==undefined&&d.bb!==''?d.bb+' kg':'-'}</td>
-                  <td class="border border-black p-2 text-center">${d.tb!==undefined&&d.tb!==''?d.tb+' cm':'-'}</td>
-                  <td class="border border-black p-2 text-center">${d.lk!==undefined&&d.lk!==''?d.lk+' cm':'-'}</td>
-                </tr>`;
-             }).join('');
-             allHtml += `<div class="${idx>0?'print-page-break':''}">
-                <div class="text-center mb-6 border-b-4 border-double border-black pb-4">
-                   <h1 class="text-2xl font-extrabold uppercase">DATA PENGUKURAN PESERTA DIDIK</h1>
-                   <h2 class="text-lg font-bold uppercase">${profil.namaSekolah||''}</h2>
-                   <p class="text-sm font-bold">Tahun Ajaran ${profil.tahunAjaran||''} | Semester ${profil.semester||''}</p>
-                   <p class="text-md font-bold mt-2 inline-block px-3 py-1 bg-gray-100 border border-gray-300 rounded">Kelas / Rombel: ${r}</p>
-                </div>
-                <table class="w-full border-collapse border border-black mb-10 text-sm">
-                  <thead><tr class="bg-gray-200">
-                    <th class="border border-black p-2 w-10 text-center">No</th>
-                    <th class="border border-black p-2 text-center">Nama Siswa</th>
-                    <th class="border border-black p-2 w-28 text-center">NISN</th>
-                    <th class="border border-black p-2 w-28 text-center">Berat Badan</th>
-                    <th class="border border-black p-2 w-28 text-center">Tinggi Badan</th>
-                    <th class="border border-black p-2 w-28 text-center">Lingkar Kepala</th>
-                  </tr></thead>
-                  <tbody>${rows}</tbody>
-                </table>
-                <div class="flex justify-between px-10 text-sm">
-                   <div class="text-center"><p>Mengetahui,<br/>Kepala Sekolah</p><p class="mt-20 font-bold underline uppercase">${profil.kepalaSekolah||'.................'}</p></div>
-                   <div class="text-center"><p>${profil.kecamatan||'..................'}, ${tgl}<br/>Wali Kelas,</p><p class="mt-20 font-bold underline uppercase">${waliName}</p></div>
-                </div>
-             </div>`;
-             idx++;
-          });
-          const html = `<html><head><title>Cetak Pengukuran Siswa</title>
-             <scr`+`ipt src="https://cdn.tailwindcss.com"></scr`+`ipt>
-             <style>@media print { body { -webkit-print-color-adjust: exact !important; } @page { size: portrait; margin: 15mm; } .print-page-break { page-break-before: always; padding-top: 10mm; } }</style>
-             </head><body class="p-8 font-sans">${allHtml}<scr`+`ipt>window.print();</scr`+`ipt></body></html>`;
-          const win = window.open('', '_blank'); win.document.write(html); win.document.close();
-       };
-       return (
-          <div className="bg-pink-50/30 border border-pink-200 rounded-2xl p-6 md:p-8 max-w-3xl mx-auto animate-[fadeIn_0.3s] space-y-4">
-             <div className="text-center">
-                <h3 className="font-bold text-lg text-pink-800 mb-1">Cetak Data Pengukuran (BB / TB / LK)</h3>
-                <p className="text-xs text-pink-700/70">Filter kelas + cari nama siswa untuk Dapodik atau laporan kesehatan.</p>
-                <p className="text-[11px] text-pink-700/80 mt-1">Database aktif: <b>{profil.tahunAjaran||'-'} - Semester {profil.semester||'-'}</b></p>
-             </div>
-             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <select value={rombel} onChange={e=>setRombel(e.target.value)} className="p-3 border border-pink-300 rounded-xl font-bold text-sm bg-white outline-none focus:ring-2 focus:ring-pink-500">
-                   <option value="">-- Pilih Kelas / Rombel --</option>
-                   <option value="ALL">-- SEMUA KELAS --</option>
-                   {rombelOptions.map(r => <option key={r} value={r}>{r}</option>)}
-                </select>
-                <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Cari nama siswa..." className="p-3 border border-pink-300 rounded-xl font-bold text-sm bg-white outline-none focus:ring-2 focus:ring-pink-500" />
-             </div>
-             <div className="bg-white border border-pink-200 rounded-xl p-3 max-h-64 overflow-y-auto">
-                {filtered.length === 0 ? <p className="text-xs text-slate-500 italic text-center py-4">Tidak ada hasil. Pilih kelas atau ubah pencarian.</p> :
-                   <div className="text-xs">
-                      <div className="font-bold text-slate-600 mb-2">Ditemukan {filtered.length} siswa:</div>
-                      <ul className="divide-y divide-pink-100">
-                         {filtered.slice(0, 50).map(s => {
-                            const d = peng[s.id] || {};
-                            return <li key={s.id} className="py-1.5 flex justify-between gap-2"><span className="font-bold">{s.nama} <span className="text-slate-400">({s.rombelSD})</span></span><span className="text-slate-500 text-[10px]">BB:{d.bb||'-'} TB:{d.tb||'-'} LK:{d.lk||'-'}</span></li>;
-                         })}
-                         {filtered.length > 50 && <li className="py-1.5 text-slate-400 text-[10px] italic">...dan {filtered.length-50} lainnya (semua tercetak)</li>}
-                      </ul>
-                   </div>
-                }
-             </div>
-             <button onClick={handleCetak} disabled={filtered.length===0} className="w-full py-4 rounded-xl font-bold text-white shadow-md flex items-center justify-center gap-2 bg-pink-600 hover:bg-pink-700 disabled:opacity-50">
-                <Printer /> Buka & Cetak Data Pengukuran
-             </button>
           </div>
        );
     }
@@ -3489,113 +3273,6 @@
           )}
         </div>
       );
-    }
-
-    function GuruInputPengukuran({ students, pengukuran, setPengukuran, profil, waliKelasName, showToast, showConfirm, isAppLocked, appConfig }) {
-       const [search, setSearch] = useState('');
-       const update = (id, field, val) => {
-          if (isAppLocked) return;
-          const num = val === '' ? '' : parseFloat(val);
-          setPengukuran(p => ({...p, [id]: {...(p[id]||{bb:'', tb:'', lk:''}), [field]: isNaN(num) ? '' : num}}));
-       };
-       const handleSave = () => { syncToCloud('pengukuran', pengukuran, profil.tahunAjaran); showToast('Data pengukuran disimpan!'); };
-       const handleReset = () => {
-          if (isAppLocked) return;
-          showConfirm('Yakin hapus seluruh data pengukuran rombel ini?', () => {
-             setPengukuran({}); syncToCloud('pengukuran', {}, profil.tahunAjaran);
-             showToast('Data pengukuran dihapus.');
-          });
-       };
-       const filtered = students.filter(s => s.nama.toLowerCase().includes(search.toLowerCase()));
-       const handleCetak = () => {
-          if (students.length === 0) { showToast('Tidak ada siswa.'); return; }
-          const tgl = profil.tanggalRaport ? new Date(profil.tanggalRaport).toLocaleDateString('id-ID', {day:'numeric',month:'long',year:'numeric'}) : '............................';
-          const rows = students.map((s, i) => {
-             const d = pengukuran[s.id] || {};
-             return `<tr>
-                <td class="border border-black p-2 text-center">${i+1}</td>
-                <td class="border border-black p-2 font-bold uppercase">${s.nama}</td>
-                <td class="border border-black p-2 text-center">${s.nisn||'-'}</td>
-                <td class="border border-black p-2 text-center">${d.bb!==undefined&&d.bb!==''?d.bb+' kg':'-'}</td>
-                <td class="border border-black p-2 text-center">${d.tb!==undefined&&d.tb!==''?d.tb+' cm':'-'}</td>
-                <td class="border border-black p-2 text-center">${d.lk!==undefined&&d.lk!==''?d.lk+' cm':'-'}</td>
-             </tr>`;
-          }).join('');
-          const html = `<html><head><title>Data Pengukuran Siswa</title>
-             <scr`+`ipt src="https://cdn.tailwindcss.com"></scr`+`ipt>
-             <style>@media print { body { -webkit-print-color-adjust: exact !important; } @page { size: portrait; margin: 15mm; } }</style>
-             </head><body class="p-8 font-sans">
-             <div class="text-center mb-6 border-b-4 border-double border-black pb-4">
-                <h1 class="text-2xl font-extrabold uppercase">DATA PENGUKURAN PESERTA DIDIK</h1>
-                <h2 class="text-lg font-bold uppercase">${profil.namaSekolah||''}</h2>
-                <p class="text-sm font-bold">Tahun Ajaran ${profil.tahunAjaran||''} | Semester ${profil.semester||''}</p>
-                <p class="text-sm font-bold mt-1">Wali Kelas: ${waliKelasName||'-'}</p>
-             </div>
-             <table class="w-full border-collapse border border-black mb-10 text-sm">
-               <thead><tr class="bg-gray-200">
-                 <th class="border border-black p-2 w-10 text-center">No</th>
-                 <th class="border border-black p-2 text-center">Nama Siswa</th>
-                 <th class="border border-black p-2 w-28 text-center">NISN</th>
-                 <th class="border border-black p-2 w-28 text-center">Berat Badan</th>
-                 <th class="border border-black p-2 w-28 text-center">Tinggi Badan</th>
-                 <th class="border border-black p-2 w-28 text-center">Lingkar Kepala</th>
-               </tr></thead>
-               <tbody>${rows}</tbody>
-             </table>
-             <div class="flex justify-between px-10 text-sm">
-                <div class="text-center"><p>Mengetahui,<br/>Kepala Sekolah</p><p class="mt-20 font-bold underline uppercase">${profil.kepalaSekolah||'.................'}</p></div>
-                <div class="text-center"><p>${profil.kecamatan||'..................'}, ${tgl}<br/>Wali Kelas,</p><p class="mt-20 font-bold underline uppercase">${waliKelasName||'.................'}</p></div>
-             </div>
-             <scr`+`ipt>window.print();</scr`+`ipt>
-             </body></html>`;
-          const w = window.open('', '_blank'); w.document.write(html); w.document.close();
-       };
-       return (
-          <div className="bg-white/90 backdrop-blur-sm p-4 sm:p-8 rounded-[2rem] shadow-sm border border-slate-100 flex flex-col h-full">
-             {isAppLocked && <AppLockBanner appConfig={appConfig} />}
-             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 sm:mb-6 border-b border-slate-100 pb-4 gap-3">
-                <div>
-                   <h2 className="font-extrabold text-lg sm:text-2xl text-slate-800">Pengukuran Siswa</h2>
-                   <p className="text-slate-500 font-medium text-[10px] sm:text-sm mt-1">Isi Berat Badan (kg), Tinggi Badan (cm), dan Lingkar Kepala (cm).</p>
-                </div>
-                <div className="flex gap-2 w-full sm:w-auto">
-                   <button onClick={handleCetak} className="bg-blue-50 hover:bg-blue-100 text-blue-600 px-3 py-2 sm:px-4 sm:py-3 rounded-xl font-bold flex items-center gap-2 text-xs sm:text-sm"><Printer /> Cetak</button>
-                   <button onClick={handleReset} disabled={isAppLocked} className="bg-red-50 hover:bg-red-100 text-red-600 px-3 py-2 sm:px-4 sm:py-3 rounded-xl font-bold flex justify-center items-center disabled:opacity-50"><Trash2 /></button>
-                   <button onClick={handleSave} disabled={isAppLocked} className="flex-1 sm:flex-none justify-center bg-primary text-white px-4 py-2 sm:px-6 sm:py-3 rounded-xl text-xs sm:text-base font-bold flex items-center gap-2 shadow-md disabled:opacity-50"><Save /> Simpan</button>
-                </div>
-             </div>
-             <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Cari nama siswa..." className="w-full p-3 mb-3 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-primary" />
-             {students.length === 0 ? <p className="font-bold text-red-500 text-xs sm:text-base">Pilih / kunci Rombel di menu "Pilih / Tarik Siswa".</p> : (
-                <div className="w-full border border-slate-200 rounded-xl overflow-x-auto">
-                   <table className="w-full text-left border-collapse text-[11px] sm:text-sm min-w-max">
-                      <thead className="bg-slate-50 border-b border-slate-200 text-slate-600">
-                         <tr>
-                            <th className="p-2 sm:px-4 sm:py-4 border-r text-center w-10">No</th>
-                            <th className="p-2 sm:px-4 sm:py-4 border-r min-w-[150px]">Nama Siswa</th>
-                            <th className="p-2 text-center border-r min-w-[100px]">BB (kg)</th>
-                            <th className="p-2 text-center border-r min-w-[100px]">TB (cm)</th>
-                            <th className="p-2 text-center min-w-[100px]">LK (cm)</th>
-                         </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                         {filtered.map((s, i) => {
-                            const d = pengukuran[s.id] || {};
-                            return (
-                               <tr key={s.id} className="hover:bg-slate-50">
-                                  <td className="p-2 sm:px-4 sm:py-4 font-bold text-slate-400 border-r text-center">{i+1}</td>
-                                  <td className="p-2 sm:px-4 sm:py-4 font-extrabold text-slate-800 border-r">{s.nama}</td>
-                                  <td className="p-1 sm:p-2 text-center border-r"><input type="number" step="0.1" min="0" disabled={isAppLocked} value={d.bb??''} onChange={e=>update(s.id,'bb',e.target.value)} className="w-full p-1.5 sm:p-2 text-center border rounded-lg font-bold outline-none focus:border-primary disabled:bg-slate-100" /></td>
-                                  <td className="p-1 sm:p-2 text-center border-r"><input type="number" step="0.1" min="0" disabled={isAppLocked} value={d.tb??''} onChange={e=>update(s.id,'tb',e.target.value)} className="w-full p-1.5 sm:p-2 text-center border rounded-lg font-bold outline-none focus:border-primary disabled:bg-slate-100" /></td>
-                                  <td className="p-1 sm:p-2 text-center"><input type="number" step="0.1" min="0" disabled={isAppLocked} value={d.lk??''} onChange={e=>update(s.id,'lk',e.target.value)} className="w-full p-1.5 sm:p-2 text-center border rounded-lg font-bold outline-none focus:border-primary disabled:bg-slate-100" /></td>
-                               </tr>
-                            );
-                         })}
-                      </tbody>
-                   </table>
-                </div>
-             )}
-          </div>
-       );
     }
 
     function GuruInputEkskul({ students, ekskulList, ekskulData, setEkskulData, profil, showToast, showConfirm, isAppLocked, appConfig }) {
