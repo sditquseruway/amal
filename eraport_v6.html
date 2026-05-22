@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="id">
 <head>
@@ -95,7 +96,7 @@
   <div id="root"></div>
 
   <script type="text/babel">
-    const { useState, useEffect, useMemo } = React;
+    const { useState, useEffect, useMemo, useRef } = React;
 
     window.isDemoAccount = false;
 
@@ -278,14 +279,41 @@
 
     // === Helper Fase Kurikulum Merdeka (A–F) ===
     // SD 1-2 = A, SD 3-4 = B, SD 5-6 = C, SMP 7-9 = D, SMA/SMK 10 = E, SMA/SMK 11-12 = F
+    // Konversi Romawi → angka (mendukung I..XII, case-insensitive)
+    const ROMAN_MAP = { I:1, V:5, X:10, L:50, C:100, D:500, M:1000 };
+    const romanToInt = (s) => {
+       const str = String(s||'').toUpperCase();
+       let total = 0, prev = 0;
+       for (let i = str.length - 1; i >= 0; i--) {
+          const v = ROMAN_MAP[str[i]];
+          if (!v) return 0;
+          if (v < prev) total -= v; else total += v;
+          prev = v;
+       }
+       return total;
+    };
+    // Ekstrak nomor tingkat dari input kelas/rombel.
+    // Mendukung: "4A", "IVA", "KELAS 3", "Kelas III", "VII B", "XII", dst.
+    const parseKelasNum = (kelasInput) => {
+       if (kelasInput === null || kelasInput === undefined) return 0;
+       if (typeof kelasInput === 'number') return kelasInput;
+       let s = String(kelasInput).toUpperCase().trim();
+       // Buang prefix "KELAS" jika ada
+       s = s.replace(/^KELAS\s*/i, '').trim();
+       // Coba angka arab dulu (mis. "4A", "10B")
+       const ar = s.match(/\d+/);
+       if (ar) return parseInt(ar[0], 10);
+       // Coba romawi prefix (mis. "IVA", "VIIB", "XII")
+       const rm = s.match(/^([IVXLC]+)/);
+       if (rm) {
+          const n = romanToInt(rm[1]);
+          if (n > 0 && n <= 12) return n;
+       }
+       return 0;
+    };
     const getFaseFromKelas = (kelasInput) => {
        if (kelasInput === null || kelasInput === undefined) return '-';
-       let n = 0;
-       if (typeof kelasInput === 'number') n = kelasInput;
-       else {
-         const m = String(kelasInput).match(/\d+/);
-         n = m ? parseInt(m[0], 10) : 0;
-       }
+       const n = parseKelasNum(kelasInput);
        if (n === 1 || n === 2) return 'A';
        if (n === 3 || n === 4) return 'B';
        if (n === 5 || n === 6) return 'C';
@@ -475,6 +503,7 @@
       const [guruRombelConfig, setGuruRombelConfig] = useState({}); 
       const [dimensiTarget, setDimensiTarget] = useState([DIMENSI_P5[0], DIMENSI_P5[5], DIMENSI_P5[3]]);
       const [kkmConfig, setKkmConfig] = useState(INITIAL_KKM);
+      const [bacaProgress, setBacaProgress] = useState({}); // { [studentId]: { quran: 'Iqro 1'|..., bind: 'Lancar Baca'|... , catatan: '' } }
 
       const [confirmDialog, setConfirmDialog] = useState(null);
 
@@ -644,6 +673,7 @@
                    if (d.guruRombelConfig) setGuruRombelConfig(d.guruRombelConfig);
                    if (d.dimensiTarget) setDimensiTarget(d.dimensiTarget);
                    if (d.kkmConfig) setKkmConfig(d.kkmConfig);
+                   if (d.bacaProgress) setBacaProgress(d.bacaProgress);
                    usedCache = true;
                    // Langsung 100% lalu masuk sistem
                    setLoadingProgress(100);
@@ -692,6 +722,7 @@
               if (json.data.guruRombelConfig) setGuruRombelConfig(json.data.guruRombelConfig);
               if (json.data.dimensiTarget) setDimensiTarget(json.data.dimensiTarget);
               if (json.data.kkmConfig) setKkmConfig(json.data.kkmConfig);
+              if (json.data.bacaProgress) setBacaProgress(json.data.bacaProgress);
               // Simpan cache untuk load berikutnya
               try { localStorage.setItem(cacheKey, JSON.stringify(json)); } catch(_) {}
             }
@@ -817,7 +848,7 @@
         );
       }
 
-      const activeContext = { profil: profilSekolah, temaConfig, appConfig, guruProfil, teachers, mapel: mapelList, ekskul: ekskulList, allStudents, materiGuru, studentGrades, absensi, ekskulData, kokuData, guruMapelConfig, dimensiTarget, kkmConfig };
+      const activeContext = { profil: profilSekolah, temaConfig, appConfig, guruProfil, teachers, mapel: mapelList, ekskul: ekskulList, allStudents, materiGuru, studentGrades, absensi, ekskulData, kokuData, guruMapelConfig, dimensiTarget, kkmConfig, bacaProgress };
 
       if (!user) return <LoginScreen onLogin={handleLogin} teachers={teachers} profil={profilSekolah} temaConfig={temaConfig} deferredPrompt={deferredPrompt} handleInstallApp={handleInstallApp} />;
 
@@ -839,6 +870,8 @@
             case 'cetak_sampul_admin': return <AdminPrintFilter defaultContext={activeContext} showToast={showToast} renderComponent={(filtered, rombel, waliName, ctx, printProfil) => <GuruCetakSampul students={filtered} profil={printProfil} temaConfig={ctx.temaConfig} showToast={showToast} />} />;
             case 'cetak_admin': return <AdminCetakAdministrasi activeContext={activeContext} calculateNA={calculateNA} showToast={showToast} />;
             case 'pusat_unduhan': return <AdminPusatUnduhan ctx={activeContext} showToast={showToast} />;
+            case 'tarik_semester_lalu': return <AdminTarikSemesterLalu profil={profilSekolah} showToast={showToast} setTeachers={setTeachers} setMapelList={setMapelList} setEkskulList={setEkskulList} setAllStudents={setAllStudents} setKkmConfig={setKkmConfig} setGuruProfil={setGuruProfil} />;
+            case 'progres_baca_admin': return <AdminLihatProgresBaca students={allStudents} bacaProgress={bacaProgress} teachers={teachers} />;
             default: return <AdminDashboard teachers={teachers} students={allStudents} />;
           }
         } else {
@@ -855,6 +888,7 @@
             case 'leger': return <GuruLeger students={students} mapelList={mapelList} calculateNA={calculateNA} profil={profilSekolah} waliKelasName={user.name} temaConfig={temaConfig} showToast={showToast} />;
             case 'cetak_rapor': return <GuruCetakRapor students={students} mapelList={mapelList} teachers={teachers} calculateNA={calculateNA} getPredikat={getPredikat} profil={profilSekolah} waliKelasName={user.name} kokuData={kokuData} dimensiTarget={dimensiTarget} ekskulList={ekskulList} ekskulData={ekskulData} absensi={absensi} materiGuru={materiGuru} studentGrades={studentGrades} kkmConfig={kkmConfig} temaConfig={temaConfig} showToast={showToast} />;
             case 'cetak_sampul': return <GuruCetakSampul students={students} profil={profilSekolah} temaConfig={temaConfig} showToast={showToast} />;
+            case 'progres_baca': return <GuruProgresBaca students={students} bacaProgress={bacaProgress} setBacaProgress={setBacaProgress} profil={profilSekolah} showToast={showToast} isAppLocked={isAppLocked} appConfig={appConfig} />;
             default: return <GuruDashboard user={user} students={students} mapelList={activeMapelList} studentGrades={studentGrades} calculateNA={calculateNA} appConfig={appConfig} />;
           }
         }
@@ -876,6 +910,8 @@
         { id: 'cetak_sampul_admin', label: 'Cetak Sampul Global', icon: <FileBadge /> },
         { id: 'cetak_admin', label: 'Cetak Administrasi', icon: <Trophy /> },
         { id: 'pusat_unduhan', label: 'Pusat Unduhan', icon: <Download /> },
+        { id: 'tarik_semester_lalu', label: 'Tarik Data Semester Lalu', icon: <Download /> },
+        { id: 'progres_baca_admin', label: 'Progres Baca (Quran & Indo)', icon: <PieChart /> },
       ] : [
         { id: 'dashboard', label: 'Dashboard Guru', icon: <Home /> },
         { id: 'profil_guru', label: 'Profil Guru', icon: <UserIcon /> },
@@ -889,6 +925,7 @@
         { id: 'leger', label: 'Cetak Leger Kelas', icon: <FileSpreadsheet /> },
         { id: 'cetak_rapor', label: 'Cetak Rapor', icon: <Printer /> },
         { id: 'cetak_sampul', label: 'Cetak Sampul Rapor', icon: <FileBadge /> },
+        { id: 'progres_baca', label: 'Progres Baca (Quran & Indo)', icon: <BookOpen /> },
       ];
 
       const userPhoto = user.role === 'admin' 
@@ -987,11 +1024,11 @@
               </div>
             </header>
             
-            <div className="flex-1 overflow-auto p-2 sm:p-6 lg:p-8 relative z-10">
+            <PullToRefreshWrapper>
               <div className="max-w-7xl mx-auto pb-12 relative">
                 {renderContent()}
               </div>
-            </div>
+            </PullToRefreshWrapper>
           </main>
           
           {isSidebarOpen && <div className="fixed inset-0 bg-slate-900/60 z-30 md:hidden" onClick={() => setIsSidebarOpen(false)}></div>}
@@ -1010,6 +1047,322 @@
     }
 
     // --- KOMPONEN PENDUKUNG ---
+
+    // === PULL-TO-REFRESH WRAPPER (mobile friendly, swipe down di area konten) ===
+    function PullToRefreshWrapper({ children }) {
+       const scrollRef = useRef(null);
+       const startY = useRef(0);
+       const pulling = useRef(false);
+       const [pull, setPull] = useState(0);
+       const [refreshing, setRefreshing] = useState(false);
+       const THRESHOLD = 70;
+
+       const onTouchStart = (e) => {
+          const el = scrollRef.current;
+          if (!el || el.scrollTop > 0 || refreshing) { pulling.current = false; return; }
+          startY.current = e.touches[0].clientY;
+          pulling.current = true;
+       };
+       const onTouchMove = (e) => {
+          if (!pulling.current) return;
+          const dy = e.touches[0].clientY - startY.current;
+          if (dy > 0) {
+             setPull(Math.min(dy * 0.5, 110));
+          } else {
+             setPull(0);
+          }
+       };
+       const onTouchEnd = () => {
+          if (!pulling.current) return;
+          pulling.current = false;
+          if (pull >= THRESHOLD) {
+             setRefreshing(true);
+             setTimeout(() => window.location.reload(), 200);
+          } else {
+             setPull(0);
+          }
+       };
+
+       return (
+          <div
+             ref={scrollRef}
+             className="flex-1 overflow-auto p-2 sm:p-6 lg:p-8 relative z-10"
+             onTouchStart={onTouchStart}
+             onTouchMove={onTouchMove}
+             onTouchEnd={onTouchEnd}
+          >
+             {(pull > 0 || refreshing) && (
+                <div className="sticky top-0 left-0 right-0 z-20 flex justify-center pointer-events-none" style={{ height: 0 }}>
+                   <div className="bg-primary text-white px-4 py-2 rounded-full shadow-lg text-xs font-bold flex items-center gap-2" style={{ transform: `translateY(${Math.max(pull - 30, 0)}px)`, opacity: Math.min(pull / THRESHOLD, 1) }}>
+                      <i className={`fas fa-sync-alt ${refreshing ? 'animate-spin' : ''}`}></i>
+                      {refreshing ? 'Memuat ulang…' : (pull >= THRESHOLD ? 'Lepas untuk refresh' : 'Tarik untuk refresh')}
+                   </div>
+                </div>
+             )}
+             {children}
+          </div>
+       );
+    }
+
+    // === ADMIN: TARIK DATA SEMESTER LALU ===
+    // Membaca cache lokal dari database lain (eraaport_cache_*) lalu menyalin
+    // profil/teachers/mapel/ekskul/kkm/guruProfil/allStudents ke database AKTIF.
+    function AdminTarikSemesterLalu({ profil, showToast, setTeachers, setMapelList, setEkskulList, setAllStudents, setKkmConfig, setGuruProfil }) {
+       const activeId = localStorage.getItem(LSK('activeTahunAjaran')) || '';
+       const [sourceId, setSourceId] = useState('');
+       const [sources, setSources] = useState([]);
+       const [picks, setPicks] = useState({ teachers: true, mapel: true, ekskul: true, kkmConfig: true, guruProfil: true, allStudents: true });
+
+       useEffect(() => {
+          // Cari semua cache database yang tersedia di localStorage perangkat ini
+          const found = [];
+          for (let i = 0; i < localStorage.length; i++) {
+             const k = localStorage.key(i) || '';
+             const m = k.match(/eraaport_cache_(.+)$/);
+             if (m && m[1] !== activeId) found.push(m[1]);
+          }
+          setSources(found.sort());
+       }, [activeId]);
+
+       const readSource = (id) => {
+          try {
+             const raw = localStorage.getItem(LSK(`eraaport_cache_${id}`));
+             if (!raw) return null;
+             const json = JSON.parse(raw);
+             return json && json.data ? json.data : null;
+          } catch (_) { return null; }
+       };
+
+       const doTarik = () => {
+          if (!sourceId) { showToast('Pilih database sumber terlebih dahulu.'); return; }
+          const data = readSource(sourceId);
+          if (!data) { showToast('Database sumber tidak ditemukan di perangkat ini. Login dulu ke database tsb agar tercache.'); return; }
+          if (!window.confirm(`Tarik data dari "${sourceId}" ke database aktif "${activeId}"?\n\nData lama di database aktif akan DITIMPA pada bagian yang dicentang.`)) return;
+
+          let count = 0;
+          if (picks.teachers && Array.isArray(data.teachers)) { setTeachers(data.teachers); syncToCloud('teachers', data.teachers, profil.tahunAjaran); count++; }
+          if (picks.mapel && Array.isArray(data.mapel)) { setMapelList(data.mapel); syncToCloud('mapel', data.mapel, profil.tahunAjaran); count++; }
+          if (picks.ekskul && Array.isArray(data.ekskul)) { setEkskulList(data.ekskul); syncToCloud('ekskul', data.ekskul, profil.tahunAjaran); count++; }
+          if (picks.kkmConfig && data.kkmConfig) { setKkmConfig(data.kkmConfig); syncToCloud('kkmConfig', data.kkmConfig, profil.tahunAjaran); count++; }
+          if (picks.guruProfil && data.guruProfil) { setGuruProfil(data.guruProfil); syncToCloud('guruProfil', data.guruProfil, profil.tahunAjaran); count++; }
+          if (picks.allStudents && Array.isArray(data.allStudents)) { setAllStudents(data.allStudents); syncToCloud('allStudents', data.allStudents, profil.tahunAjaran); count++; }
+
+          showToast(`✅ Berhasil menarik ${count} kategori data. Memuat ulang…`);
+          setTimeout(() => window.location.reload(), 1200);
+       };
+
+       const items = [
+          ['teachers','Data Guru'],['mapel','Mata Pelajaran'],['ekskul','Ekstrakurikuler'],
+          ['kkmConfig','KKM & Predikat'],['guruProfil','Profil Guru'],['allStudents','Data Siswa']
+       ];
+
+       return (
+          <div className="space-y-6 max-w-3xl">
+             <div className="bg-white/90 backdrop-blur-sm p-6 sm:p-8 rounded-[2rem] border border-slate-100 shadow-sm">
+                <h2 className="font-extrabold text-xl sm:text-2xl text-slate-800 mb-1">Tarik Data Semester Lalu</h2>
+                <p className="text-slate-500 font-medium text-xs sm:text-sm mb-6">
+                   Salin data dari database semester/tahun sebelumnya ke database AKTIF (<b className="text-primary">{activeId || '—'}</b>).
+                   Sumber harus pernah dibuka di perangkat ini (agar tercache).
+                </p>
+
+                <div className="mb-4">
+                   <label className="block text-xs font-bold text-slate-600 mb-1">Database Sumber</label>
+                   <select value={sourceId} onChange={e=>setSourceId(e.target.value)} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-sm outline-none focus:ring-2 focus:ring-primary">
+                      <option value="">-- Pilih database sumber --</option>
+                      {sources.map(s => <option key={s} value={s}>{s}</option>)}
+                   </select>
+                   {sources.length === 0 && <p className="text-[11px] text-amber-700 font-semibold mt-2">Belum ada cache database lain. Login dulu ke database lama dari perangkat ini.</p>}
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-6">
+                   {items.map(([k,label]) => (
+                      <label key={k} className={`flex items-center gap-2 p-3 rounded-xl border cursor-pointer text-sm font-bold ${picks[k]?'bg-primaryLight border-primary text-primaryHover':'bg-slate-50 border-slate-200 text-slate-500'}`}>
+                         <input type="checkbox" checked={!!picks[k]} onChange={e=>setPicks(p=>({ ...p, [k]: e.target.checked }))} />
+                         {label}
+                      </label>
+                   ))}
+                </div>
+
+                <button onClick={doTarik} disabled={!sourceId} className="w-full sm:w-auto bg-primary hover:bg-primaryHover text-white px-6 py-3 rounded-xl font-bold shadow-md disabled:opacity-50">
+                   <i className="fas fa-download mr-2"></i> Tarik & Timpa ke Database Aktif
+                </button>
+             </div>
+          </div>
+       );
+    }
+
+    // === GURU: INPUT PROGRES BACA QURAN & INDONESIA ===
+    const QURAN_LEVELS = ['Belum', 'Iqro 1', 'Iqro 2', 'Iqro 3', 'Iqro 4', 'Iqro 5', 'Iqro 6', 'Sudah Al-Quran'];
+    const BIND_LEVELS = ['Tidak Kenal Huruf', 'Kenal Huruf', 'Mengeja', 'Lancar Baca'];
+    const isQuranLagging = (v) => !v || v === 'Belum' || /Iqro/i.test(v);
+    const isBindLagging = (v) => !v || v === 'Tidak Kenal Huruf' || v === 'Kenal Huruf' || v === 'Mengeja';
+
+    function GuruProgresBaca({ students, bacaProgress, setBacaProgress, profil, showToast, isAppLocked, appConfig }) {
+       const update = (sid, field, value) => {
+          if (isAppLocked) { showToast('Aplikasi sedang dikunci admin.'); return; }
+          setBacaProgress(prev => {
+             const next = { ...prev, [sid]: { ...(prev[sid]||{}), [field]: value } };
+             syncToCloud('bacaProgress', next, profil.tahunAjaran);
+             return next;
+          });
+       };
+
+       if (!students || students.length === 0) {
+          return <div className="p-8 bg-white rounded-2xl text-center text-slate-500 font-bold">Tarik siswa terlebih dahulu di menu "Pilih / Tarik Siswa".</div>;
+       }
+
+       return (
+          <div className="bg-white/90 backdrop-blur-sm p-4 sm:p-6 rounded-[2rem] border border-slate-100 shadow-sm">
+             <h2 className="font-extrabold text-lg sm:text-xl text-slate-800 mb-1">Progres Baca Quran & Bahasa Indonesia</h2>
+             <p className="text-slate-500 font-medium text-xs sm:text-sm mb-4">Baris <span className="px-1.5 py-0.5 rounded bg-red-100 text-red-700 font-bold">merah</span> = belum lancar / masih Iqro / belum kenal huruf.</p>
+             <div className="overflow-x-auto border border-slate-200 rounded-xl">
+                <table className="w-full text-sm">
+                   <thead className="bg-slate-50">
+                      <tr>
+                         <th className="text-left p-2 font-bold w-10">No</th>
+                         <th className="text-left p-2 font-bold">Nama Siswa</th>
+                         <th className="text-left p-2 font-bold">Baca Quran</th>
+                         <th className="text-left p-2 font-bold">Baca Bahasa Indonesia</th>
+                      </tr>
+                   </thead>
+                   <tbody>
+                      {students.map((s, i) => {
+                         const row = bacaProgress[s.id] || {};
+                         const warn = isQuranLagging(row.quran) || isBindLagging(row.bind);
+                         return (
+                            <tr key={s.id} className={`border-t border-slate-100 ${warn?'bg-red-50':''}`}>
+                               <td className="p-2">{i+1}</td>
+                               <td className="p-2 font-bold uppercase">{s.nama}</td>
+                               <td className="p-2">
+                                  <select value={row.quran||''} onChange={e=>update(s.id,'quran',e.target.value)} className={`p-2 border rounded-lg text-xs font-bold w-full ${isQuranLagging(row.quran)?'border-red-300 bg-red-50 text-red-700':'border-slate-200'}`}>
+                                     <option value="">-- pilih --</option>
+                                     {QURAN_LEVELS.map(l => <option key={l} value={l}>{l}</option>)}
+                                  </select>
+                               </td>
+                               <td className="p-2">
+                                  <select value={row.bind||''} onChange={e=>update(s.id,'bind',e.target.value)} className={`p-2 border rounded-lg text-xs font-bold w-full ${isBindLagging(row.bind)?'border-red-300 bg-red-50 text-red-700':'border-slate-200'}`}>
+                                     <option value="">-- pilih --</option>
+                                     {BIND_LEVELS.map(l => <option key={l} value={l}>{l}</option>)}
+                                  </select>
+                               </td>
+                            </tr>
+                         );
+                      })}
+                   </tbody>
+                </table>
+             </div>
+          </div>
+       );
+    }
+
+    // === ADMIN: LIHAT PROGRES BACA (GRAFIK) ===
+    function AdminLihatProgresBaca({ students, bacaProgress, teachers }) {
+       const [search, setSearch] = useState('');
+       const [rombelFilter, setRombelFilter] = useState('');
+       const rombelOptions = [...new Set(students.map(s => s.rombelSD))].filter(r => r && r !== '-').sort();
+
+       const filtered = students.filter(s => {
+          if (rombelFilter && s.rombelSD !== rombelFilter) return false;
+          if (search && !String(s.nama||'').toLowerCase().includes(search.toLowerCase())) return false;
+          return true;
+       });
+
+       // Statistik
+       const total = filtered.length;
+       const quranStats = { 'Sudah Al-Quran': 0, 'Iqro 4-6': 0, 'Iqro 1-3': 0, 'Belum/Kosong': 0 };
+       const bindStats = { 'Lancar Baca': 0, 'Mengeja': 0, 'Kenal Huruf': 0, 'Tidak Kenal Huruf/Kosong': 0 };
+       filtered.forEach(s => {
+          const r = bacaProgress[s.id] || {};
+          const q = r.quran;
+          if (q === 'Sudah Al-Quran') quranStats['Sudah Al-Quran']++;
+          else if (/Iqro [456]/.test(q||'')) quranStats['Iqro 4-6']++;
+          else if (/Iqro [123]/.test(q||'')) quranStats['Iqro 1-3']++;
+          else quranStats['Belum/Kosong']++;
+
+          const b = r.bind;
+          if (b === 'Lancar Baca') bindStats['Lancar Baca']++;
+          else if (b === 'Mengeja') bindStats['Mengeja']++;
+          else if (b === 'Kenal Huruf') bindStats['Kenal Huruf']++;
+          else bindStats['Tidak Kenal Huruf/Kosong']++;
+       });
+
+       const Bar = ({ label, value, total, color }) => {
+          const pct = total > 0 ? Math.round((value/total)*100) : 0;
+          return (
+             <div className="mb-2">
+                <div className="flex justify-between text-xs font-bold mb-1"><span>{label}</span><span>{value} ({pct}%)</span></div>
+                <div className="h-3 bg-slate-100 rounded-full overflow-hidden"><div className="h-full rounded-full" style={{ width: pct+'%', background: color }}></div></div>
+             </div>
+          );
+       };
+
+       return (
+          <div className="space-y-6">
+             <div className="bg-white/90 backdrop-blur-sm p-6 rounded-[2rem] border border-slate-100 shadow-sm">
+                <h2 className="font-extrabold text-xl text-slate-800 mb-1">Progres Baca Siswa</h2>
+                <p className="text-slate-500 text-xs font-medium mb-4">Pantauan kemampuan baca Al-Quran dan Bahasa Indonesia. Warna <span className="text-red-600 font-bold">merah</span> = pedoman butuh perhatian.</p>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+                   <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Cari nama siswa…" className="p-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-sm outline-none focus:ring-2 focus:ring-primary" />
+                   <select value={rombelFilter} onChange={e=>setRombelFilter(e.target.value)} className="p-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-sm outline-none focus:ring-2 focus:ring-primary">
+                      <option value="">Semua Kelas</option>
+                      {rombelOptions.map(r => <option key={r} value={r}>{r}</option>)}
+                   </select>
+                   <div className="p-3 bg-primaryLight border border-primary/30 rounded-xl font-bold text-sm text-primaryHover text-center">Total Siswa: {total}</div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                   <div className="border border-slate-200 rounded-xl p-4">
+                      <h3 className="font-extrabold text-slate-800 mb-3">Baca Al-Quran</h3>
+                      <Bar label="Sudah Al-Quran" value={quranStats['Sudah Al-Quran']} total={total} color="#10b981" />
+                      <Bar label="Iqro 4-6" value={quranStats['Iqro 4-6']} total={total} color="#f59e0b" />
+                      <Bar label="Iqro 1-3" value={quranStats['Iqro 1-3']} total={total} color="#ef4444" />
+                      <Bar label="Belum/Kosong" value={quranStats['Belum/Kosong']} total={total} color="#94a3b8" />
+                   </div>
+                   <div className="border border-slate-200 rounded-xl p-4">
+                      <h3 className="font-extrabold text-slate-800 mb-3">Baca Bahasa Indonesia</h3>
+                      <Bar label="Lancar Baca" value={bindStats['Lancar Baca']} total={total} color="#10b981" />
+                      <Bar label="Mengeja" value={bindStats['Mengeja']} total={total} color="#f59e0b" />
+                      <Bar label="Kenal Huruf" value={bindStats['Kenal Huruf']} total={total} color="#f97316" />
+                      <Bar label="Tidak Kenal Huruf/Kosong" value={bindStats['Tidak Kenal Huruf/Kosong']} total={total} color="#ef4444" />
+                   </div>
+                </div>
+             </div>
+
+             <div className="bg-white/90 backdrop-blur-sm p-4 rounded-[2rem] border border-slate-100 shadow-sm">
+                <h3 className="font-extrabold text-slate-800 mb-3">Detail Per Siswa</h3>
+                <div className="overflow-x-auto border border-slate-200 rounded-xl">
+                   <table className="w-full text-sm">
+                      <thead className="bg-slate-50">
+                         <tr>
+                            <th className="text-left p-2 font-bold w-10">No</th>
+                            <th className="text-left p-2 font-bold">Nama</th>
+                            <th className="text-left p-2 font-bold">Kelas</th>
+                            <th className="text-left p-2 font-bold">Baca Quran</th>
+                            <th className="text-left p-2 font-bold">Baca Indo</th>
+                         </tr>
+                      </thead>
+                      <tbody>
+                         {filtered.map((s, i) => {
+                            const r = bacaProgress[s.id] || {};
+                            const warn = isQuranLagging(r.quran) || isBindLagging(r.bind);
+                            return (
+                               <tr key={s.id} className={`border-t border-slate-100 ${warn?'bg-red-50':''}`}>
+                                  <td className="p-2">{i+1}</td>
+                                  <td className="p-2 font-bold uppercase">{s.nama}</td>
+                                  <td className="p-2">{s.rombelSD}</td>
+                                  <td className={`p-2 font-bold ${isQuranLagging(r.quran)?'text-red-600':'text-emerald-700'}`}>{r.quran||'—'}</td>
+                                  <td className={`p-2 font-bold ${isBindLagging(r.bind)?'text-red-600':'text-emerald-700'}`}>{r.bind||'—'}</td>
+                               </tr>
+                            );
+                         })}
+                         {filtered.length === 0 && <tr><td colSpan="5" className="p-6 text-center text-slate-400 font-medium">Tidak ada data.</td></tr>}
+                      </tbody>
+                   </table>
+                </div>
+             </div>
+          </div>
+       );
+    }
 
     function LoginScreen({ onLogin, teachers, profil, temaConfig, deferredPrompt, handleInstallApp }) {
       const [username, setUsername] = useState('');
@@ -1130,7 +1483,16 @@
                    {refreshingDb && <span className="text-[9px] font-bold text-primary normal-case">memuat…</span>}
                 </label>
                 {knownDatabases.length > 0 ? (
-                  <select value={selDbId} onChange={e => setSelDbId(e.target.value)} className="w-full p-2.5 bg-white border border-slate-200 rounded-lg font-bold text-sm focus:ring-2 focus:ring-primary outline-none">
+                  <select value={selDbId} onChange={e => {
+                       const newId = e.target.value;
+                       setSelDbId(newId);
+                       // AUTO REFRESH: begitu pilih database, langsung aktifkan & reload halaman
+                       const prev = localStorage.getItem(LSK('activeTahunAjaran')) || '';
+                       if (newId && newId !== prev) {
+                          localStorage.setItem(LSK('activeTahunAjaran'), newId);
+                          window.location.reload();
+                       }
+                    }} className="w-full p-2.5 bg-white border border-slate-200 rounded-lg font-bold text-sm focus:ring-2 focus:ring-primary outline-none">
                     {knownDatabases.map(d => <option key={d.id} value={d.id}>{d.label || labelDb(d.tahun, d.semester)}</option>)}
                   </select>
                 ) : (
