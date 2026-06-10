@@ -1,4 +1,5 @@
 
+
 <!DOCTYPE html>
 <html lang="id">
 <head>
@@ -161,6 +162,34 @@
       if (m2 && /\.(png|jpe?g|gif|webp|svg)/i.test(m2[1])) return m2[1];
       return String(s).replace(/<[^>]*>/g,'').trim();
     };
+    // === Helper merge per-key slices (materiGuru::*, studentGrades::*, dst.)
+    // Mencegah data hilang akibat last-writer-wins ketika banyak guru menyimpan paralel.
+    const PER_KEY_PREFIXES = ['materiGuru', 'studentGrades', 'absensi', 'ekskulData', 'kokuData'];
+    function mergePerKeySlices(allData) {
+      if (!allData || typeof allData !== 'object') return allData;
+      const merged = { ...allData };
+      PER_KEY_PREFIXES.forEach(prefix => {
+        const base = (merged[prefix] && typeof merged[prefix] === 'object') ? { ...merged[prefix] } : {};
+        Object.keys(allData).forEach(k => {
+          if (k.indexOf(prefix + '::') !== 0) return;
+          const subKey = k.slice(prefix.length + 2);
+          const val = allData[k];
+          if (prefix === 'materiGuru') {
+            // shape: { [rombel_mapel]: string[] }
+            base[subKey] = val;
+          } else if (prefix === 'studentGrades') {
+            // shape: { [mapel]: { [studentId]: {...} } }
+            base[subKey] = val;
+          } else {
+            // absensi / ekskulData / kokuData: slice adalah { [studentId]: {...}, __tema? }
+            if (val && typeof val === 'object') Object.assign(base, val);
+          }
+        });
+        merged[prefix] = base;
+      });
+      return merged;
+    }
+
     // === GAS_URL WAJIB datang dari SEKOLAH_CONFIG (multi-tenant). Tidak ada fallback agar data tidak nyasar ke DB sekolah lain. ===
     const GAS_URL = (__SC.appsScriptUrl || '').trim();
     if (!GAS_URL) {
@@ -650,7 +679,7 @@
              if (cached) {
                 const json = JSON.parse(cached);
                 if (json && json.data) {
-                   const d = json.data;
+                   const d = mergePerKeySlices(json.data);
                    if (d.profil) {
                       const _id = localStorage.getItem(LSK('activeTahunAjaran')) || '';
                       const m = _id.match(/^(\d{4})_(\d{4})_semester_(\d+)$/);
@@ -700,6 +729,7 @@
             const json = await res.json();
             
             if (json.status === 'success' && json.data) {
+              json.data = mergePerKeySlices(json.data);
               if (json.data.profil) {
                  const _id = localStorage.getItem(LSK('activeTahunAjaran')) || '';
                  const m = _id.match(/^(\d{4})_(\d{4})_semester_(\d+)$/);
@@ -882,9 +912,9 @@
             case 'tarik_siswa': return <GuruTarikSiswa allStudents={allStudents} guruRombelConfig={guruRombelConfig} setGuruRombelConfig={setGuruRombelConfig} username={user.username} profil={profilSekolah} teachers={teachers} showToast={showToast} isAppLocked={isAppLocked} appConfig={appConfig} />;
             case 'input_materi': return <GuruInputMateri mapelList={activeMapelList} materiGuru={materiGuru} setMateriGuru={setMateriGuru} profil={profilSekolah} showToast={showToast} isAppLocked={isAppLocked} appConfig={appConfig} selectedRombel={currentRombel} />;
            case 'input_nilai': return <GuruInputNilai mapelList={activeMapelList} materiGuru={materiGuru} studentGrades={studentGrades} setStudentGrades={setStudentGrades} students={students} calculateNA={calculateNA} profil={profilSekolah} showToast={showToast} showConfirm={showConfirm} isAppLocked={isAppLocked} appConfig={appConfig} selectedRombel={currentRombel} kkmConfig={kkmConfig} />;
-            case 'input_absensi': return <GuruInputAbsensi students={students} absensi={absensi} setAbsensi={setAbsensi} profil={profilSekolah} showToast={showToast} showConfirm={showConfirm} isAppLocked={isAppLocked} appConfig={appConfig} />;
-            case 'input_ekskul': return <GuruInputEkskul students={students} ekskulList={ekskulList} ekskulData={ekskulData} setEkskulData={setEkskulData} profil={profilSekolah} showToast={showToast} showConfirm={showConfirm} isAppLocked={isAppLocked} appConfig={appConfig} />;
-            case 'input_koku': return <GuruInputKoku students={students} kokuData={kokuData} setKokuData={setKokuData} dimensiTarget={dimensiTarget} setDimensiTarget={setDimensiTarget} profil={profilSekolah} showToast={showToast} showConfirm={showConfirm} isAppLocked={isAppLocked} appConfig={appConfig} />;
+            case 'input_absensi': return <GuruInputAbsensi students={students} absensi={absensi} setAbsensi={setAbsensi} profil={profilSekolah} showToast={showToast} showConfirm={showConfirm} isAppLocked={isAppLocked} appConfig={appConfig} selectedRombel={currentRombel} />;
+            case 'input_ekskul': return <GuruInputEkskul students={students} ekskulList={ekskulList} ekskulData={ekskulData} setEkskulData={setEkskulData} profil={profilSekolah} showToast={showToast} showConfirm={showConfirm} isAppLocked={isAppLocked} appConfig={appConfig} selectedRombel={currentRombel} />;
+            case 'input_koku': return <GuruInputKoku students={students} kokuData={kokuData} setKokuData={setKokuData} dimensiTarget={dimensiTarget} setDimensiTarget={setDimensiTarget} profil={profilSekolah} showToast={showToast} showConfirm={showConfirm} isAppLocked={isAppLocked} appConfig={appConfig} selectedRombel={currentRombel} />;
             case 'leger': return <GuruLeger students={students} mapelList={mapelList} calculateNA={calculateNA} profil={profilSekolah} waliKelasName={user.name} temaConfig={temaConfig} showToast={showToast} />;
             case 'cetak_rapor': return <GuruCetakRapor students={students} mapelList={mapelList} teachers={teachers} calculateNA={calculateNA} getPredikat={getPredikat} profil={profilSekolah} waliKelasName={user.name} kokuData={kokuData} dimensiTarget={dimensiTarget} ekskulList={ekskulList} ekskulData={ekskulData} absensi={absensi} materiGuru={materiGuru} studentGrades={studentGrades} kkmConfig={kkmConfig} temaConfig={temaConfig} showToast={showToast} />;
             case 'cetak_sampul': return <GuruCetakSampul students={students} profil={profilSekolah} temaConfig={temaConfig} showToast={showToast} />;
@@ -3316,7 +3346,8 @@
         const updatedMateri = materiInput.map(m => m.trim());
         setMateriGuru(prev => {
           const stateUpdate = { ...prev, [currentKey]: updatedMateri };
-          syncToCloud('materiGuru', stateUpdate, profil.tahunAjaran);
+          // PER-KEY SAVE: hanya kirim slice milik (rombel+mapel) ini agar guru lain tidak tertimpa
+          syncToCloud(`materiGuru::${currentKey}`, updatedMateri, profil.tahunAjaran);
           return stateUpdate;
         });
         showToast(`Materi ${selectedMapel} untuk Kelas ${selectedRombel} berhasil disimpan!`);
@@ -3391,7 +3422,9 @@
       };
 
       const handleSave = () => {
-        syncToCloud('studentGrades', studentGrades, profil.tahunAjaran);
+        // PER-MAPEL SAVE: kirim hanya nilai mapel ini agar tidak menimpa data mapel guru lain
+        const slice = studentGrades[selectedMapel] || {};
+        syncToCloud(`studentGrades::${selectedMapel}`, slice, profil.tahunAjaran);
         showToast(`Semua Nilai Akademik Mapel ${selectedMapel} Disimpan!`);
       };
 
@@ -3401,7 +3434,8 @@
           setStudentGrades(prev => {
             const updated = { ...prev };
             delete updated[selectedMapel];
-            syncToCloud('studentGrades', updated, profil.tahunAjaran);
+            // Reset: kosongkan slice mapel ini saja
+            syncToCloud(`studentGrades::${selectedMapel}`, {}, profil.tahunAjaran);
             return updated;
           });
           showToast(`Data Nilai ${selectedMapel} Berhasil Dihapus!`);
@@ -3561,7 +3595,7 @@
       );
     }
 
-    function GuruInputAbsensi({ students, absensi, setAbsensi, profil, showToast, showConfirm, isAppLocked, appConfig }) {
+    function GuruInputAbsensi({ students, absensi, setAbsensi, profil, showToast, showConfirm, isAppLocked, appConfig, selectedRombel }) {
       const updateAbsen = (id, field, val) => {
         if(isAppLocked) return;
         const num = parseInt(val) || 0;
@@ -3569,15 +3603,20 @@
       };
 
       const handleSave = () => {
-        syncToCloud('absensi', absensi, profil.tahunAjaran);
+        if (!selectedRombel) { showToast('Pilih rombel terlebih dahulu.'); return; }
+        // PER-ROMBEL SAVE: hanya kirim absensi siswa di rombel ini
+        const slice = {};
+        students.forEach(s => { if (absensi[s.id]) slice[s.id] = absensi[s.id]; });
+        syncToCloud(`absensi::${selectedRombel}`, slice, profil.tahunAjaran);
         showToast('Data Kehadiran Disimpan!');
       };
 
       const handleReset = () => {
         if(isAppLocked) return;
         showConfirm('Yakin ingin KOSONGKAN/HAPUS seluruh Absensi untuk rombel ini?', () => {
-          setAbsensi({});
-          syncToCloud('absensi', {}, profil.tahunAjaran);
+          const ids = new Set(students.map(s=>s.id));
+          setAbsensi(prev => { const u={...prev}; ids.forEach(id=>delete u[id]); return u; });
+          if (selectedRombel) syncToCloud(`absensi::${selectedRombel}`, {}, profil.tahunAjaran);
           showToast('Data Absensi berhasil dihapus!');
         });
       };
@@ -3637,7 +3676,7 @@
       );
     }
 
-    function GuruInputEkskul({ students, ekskulList, ekskulData, setEkskulData, profil, showToast, showConfirm, isAppLocked, appConfig }) {
+    function GuruInputEkskul({ students, ekskulList, ekskulData, setEkskulData, profil, showToast, showConfirm, isAppLocked, appConfig, selectedRombel }) {
       const updateEkskul = (sId, eksName, field, val) => {
         if(isAppLocked) return;
         setEkskulData(p => ({
@@ -3653,15 +3692,19 @@
       };
 
       const handleSave = () => {
-        syncToCloud('ekskulData', ekskulData, profil.tahunAjaran);
+        if (!selectedRombel) { showToast('Pilih rombel terlebih dahulu.'); return; }
+        const slice = {};
+        students.forEach(s => { if (ekskulData[s.id]) slice[s.id] = ekskulData[s.id]; });
+        syncToCloud(`ekskulData::${selectedRombel}`, slice, profil.tahunAjaran);
         showToast('Ekstrakurikuler disimpan!');
       };
 
       const handleReset = () => {
         if(isAppLocked) return;
         showConfirm('Yakin ingin KOSONGKAN seluruh data Penilaian Ekstrakurikuler?', () => {
-          setEkskulData({});
-          syncToCloud('ekskulData', {}, profil.tahunAjaran);
+          const ids = new Set(students.map(s=>s.id));
+          setEkskulData(prev => { const u={...prev}; ids.forEach(id=>delete u[id]); return u; });
+          if (selectedRombel) syncToCloud(`ekskulData::${selectedRombel}`, {}, profil.tahunAjaran);
           showToast('Data Ekstrakurikuler berhasil dihapus!');
         });
       };
@@ -3710,7 +3753,7 @@
       );
     }
 
-    function GuruInputKoku({ students, kokuData, setKokuData, dimensiTarget, setDimensiTarget, profil, showToast, showConfirm, isAppLocked, appConfig }) {
+    function GuruInputKoku({ students, kokuData, setKokuData, dimensiTarget, setDimensiTarget, profil, showToast, showConfirm, isAppLocked, appConfig, selectedRombel }) {
       const [expandedRowId, setExpandedRowId] = useState(null);
 
       const handleUpdate = (id, field, val) => {
@@ -3723,7 +3766,12 @@
       };
 
       const handleSave = () => {
-        syncToCloud('kokuData', kokuData, profil.tahunAjaran);
+        if (!selectedRombel) { showToast('Pilih rombel terlebih dahulu.'); return; }
+        // PER-ROMBEL SAVE untuk koku; __tema (shared antar rombel) tetap dikirim sebagai field global
+        const slice = {};
+        students.forEach(s => { if (kokuData[s.id]) slice[s.id] = kokuData[s.id]; });
+        if (kokuData.__tema !== undefined) slice.__tema = kokuData.__tema;
+        syncToCloud(`kokuData::${selectedRombel}`, slice, profil.tahunAjaran);
         syncToCloud('dimensiTarget', dimensiTarget, profil.tahunAjaran);
         showToast('Penilaian P5 disimpan!');
       };
@@ -3731,8 +3779,9 @@
       const handleReset = () => {
         if(isAppLocked) return;
         showConfirm('Yakin ingin KOSONGKAN seluruh data Penilaian Kokurikuler (P5)?', () => {
-          setKokuData({});
-          syncToCloud('kokuData', {}, profil.tahunAjaran);
+          const ids = new Set(students.map(s=>s.id));
+          setKokuData(prev => { const u={...prev}; ids.forEach(id=>delete u[id]); return u; });
+          if (selectedRombel) syncToCloud(`kokuData::${selectedRombel}`, (kokuData.__tema!==undefined?{__tema:kokuData.__tema}:{}), profil.tahunAjaran);
           showToast('Data Kokurikuler berhasil dihapus!');
         });
       };
