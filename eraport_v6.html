@@ -1,5 +1,3 @@
-
-
 <!DOCTYPE html>
 <html lang="id">
 <head>
@@ -233,6 +231,18 @@
           window.dispatchEvent(new CustomEvent('demo-toast', { detail: `❌ Gagal menyimpan ${key}. Cek koneksi atau izin Apps Script.` }));
         } else {
           console.log(`[Cloud Sync OK] ${key} → ${GAS_URL.slice(-12)}`);
+          // === Patch cache localStorage agar refresh tidak menampilkan data lama
+          try {
+            const ck = LSK(`eraaport_cache_${_activeDbId}`);
+            const raw = localStorage.getItem(ck);
+            if (raw) {
+              const obj = JSON.parse(raw);
+              if (obj && obj.data) {
+                obj.data[key] = payload;
+                localStorage.setItem(ck, JSON.stringify(obj));
+              }
+            }
+          } catch(_) {}
         }
       } catch (error) {
         console.error(`[Cloud Sync Failed] Key: ${key}`, error);
@@ -378,6 +388,42 @@
           arr[row][col] += cc;
       }
       return arr;
+    }
+
+    // === Helper format tanggal Indonesia ("20 Juni 2026")
+    function formatTanggalIndo(dateStr) {
+      if (!dateStr) return '';
+      const bulan = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
+      const s = String(dateStr).trim();
+      let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+      if (m) return `${parseInt(m[3],10)} ${bulan[parseInt(m[2],10)-1]} ${m[1]}`;
+      m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
+      if (m) return `${parseInt(m[1],10)} ${bulan[parseInt(m[2],10)-1]} ${m[3]}`;
+      const d = new Date(s);
+      if (!isNaN(d.getTime())) return `${d.getDate()} ${bulan[d.getMonth()]} ${d.getFullYear()}`;
+      return s;
+    }
+
+    // === Helper konversi URL Google Sheets apa pun menjadi link export CSV agar fetch berhasil
+    function normalizeGsheetCsvUrl(u) {
+      if (!u) return u;
+      let url = String(u).trim();
+      const idMatch = url.match(/docs\.google\.com\/spreadsheets\/(?:d\/e\/)?([a-zA-Z0-9_-]+)|docs\.google\.com\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);
+      if (!idMatch) return url;
+      const id = idMatch[1] || idMatch[2];
+      let gid = '0';
+      const g = url.match(/[?&#]gid=(\d+)/);
+      if (g) gid = g[1];
+      // Sudah berformat CSV → biarkan
+      if (/\/pub\b/.test(url) && /output=csv/.test(url)) return url;
+      if (/\/export\b/.test(url) && /format=csv/.test(url)) return url;
+      // Published-to-web tanpa output=csv
+      if (/\/pub\b/.test(url)) {
+        const sep = url.includes('?') ? '&' : '?';
+        return url + sep + 'output=csv' + (g ? '' : '');
+      }
+      // Edit/view URL → konversi ke export
+      return `https://docs.google.com/spreadsheets/d/${id}/export?format=csv&gid=${gid}`;
     }
 
     // CSV download helper
@@ -910,8 +956,8 @@
             case 'profil_guru': return <GuruProfil guruProfil={guruProfil} setGuruProfil={setGuruProfil} username={user.username} profil={profilSekolah} showToast={showToast} />;
             case 'pengaturan_mapel': return <GuruPengaturanMapel mapelList={mapelList} activeMapelList={activeMapelList} setGuruMapelConfig={setGuruMapelConfig} username={user.username} profil={profilSekolah} showToast={showToast} isAppLocked={isAppLocked} appConfig={appConfig} selectedRombel={currentRombel} />;
             case 'tarik_siswa': return <GuruTarikSiswa allStudents={allStudents} guruRombelConfig={guruRombelConfig} setGuruRombelConfig={setGuruRombelConfig} username={user.username} profil={profilSekolah} teachers={teachers} showToast={showToast} isAppLocked={isAppLocked} appConfig={appConfig} />;
-            case 'input_materi': return <GuruInputMateri mapelList={activeMapelList} materiGuru={materiGuru} setMateriGuru={setMateriGuru} profil={profilSekolah} showToast={showToast} isAppLocked={isAppLocked} appConfig={appConfig} selectedRombel={currentRombel} />;
-           case 'input_nilai': return <GuruInputNilai mapelList={activeMapelList} materiGuru={materiGuru} studentGrades={studentGrades} setStudentGrades={setStudentGrades} students={students} calculateNA={calculateNA} profil={profilSekolah} showToast={showToast} showConfirm={showConfirm} isAppLocked={isAppLocked} appConfig={appConfig} selectedRombel={currentRombel} kkmConfig={kkmConfig} />;
+            case 'input_materi': return <GuruInputMateri mapelList={mapelList.length ? mapelList : activeMapelList} materiGuru={materiGuru} setMateriGuru={setMateriGuru} profil={profilSekolah} showToast={showToast} isAppLocked={isAppLocked} appConfig={appConfig} selectedRombel={currentRombel} />;
+           case 'input_nilai': return <GuruInputNilai mapelList={mapelList.length ? mapelList : activeMapelList} materiGuru={materiGuru} studentGrades={studentGrades} setStudentGrades={setStudentGrades} students={students} calculateNA={calculateNA} profil={profilSekolah} showToast={showToast} showConfirm={showConfirm} isAppLocked={isAppLocked} appConfig={appConfig} selectedRombel={currentRombel} kkmConfig={kkmConfig} />;
             case 'input_absensi': return <GuruInputAbsensi students={students} absensi={absensi} setAbsensi={setAbsensi} profil={profilSekolah} showToast={showToast} showConfirm={showConfirm} isAppLocked={isAppLocked} appConfig={appConfig} selectedRombel={currentRombel} />;
             case 'input_ekskul': return <GuruInputEkskul students={students} ekskulList={ekskulList} ekskulData={ekskulData} setEkskulData={setEkskulData} profil={profilSekolah} showToast={showToast} showConfirm={showConfirm} isAppLocked={isAppLocked} appConfig={appConfig} selectedRombel={currentRombel} />;
             case 'input_koku': return <GuruInputKoku students={students} kokuData={kokuData} setKokuData={setKokuData} dimensiTarget={dimensiTarget} setDimensiTarget={setDimensiTarget} profil={profilSekolah} showToast={showToast} showConfirm={showConfirm} isAppLocked={isAppLocked} appConfig={appConfig} selectedRombel={currentRombel} />;
@@ -1689,7 +1735,7 @@
         if(!csvUrl) return;
         setLoadingCsv(true);
         try {
-          const res = await fetch(csvUrl);
+          const res = await fetch(normalizeGsheetCsvUrl(csvUrl));
           if(!res.ok) throw new Error("Gagal mengambil data");
           const text = await res.text();
           const rows = parseCSV(text).filter(r => r && r.some(c => c.trim() !== ''));
@@ -2122,7 +2168,7 @@
       const handleSync = async () => {
         setLoading(true);
         try {
-          const res = await fetch(csvUrl);
+          const res = await fetch(normalizeGsheetCsvUrl(csvUrl));
           if(!res.ok) throw new Error("Gagal mengambil data");
           
           const text = await res.text();
@@ -3020,7 +3066,7 @@
                          <p class="font-bold underline uppercase">${activeContext.profil.kepalaSekolah}</p>
                       </div>
                       <div class="text-center">
-                         <p class="mb-24">${cetakKecamatan}, ${activeContext.profil.tanggalRaport || '.........................'}<br/>Wali Kelas,</p>
+                         <p class="mb-24">${cetakKecamatan}, ${formatTanggalIndo(activeContext.profil.tanggalRaport) || '.........................'}<br/>Wali Kelas,</p>
                          <p class="font-bold underline uppercase">${waliName}</p>
                       </div>
                    </div>
@@ -3286,7 +3332,17 @@
 
       const handleTarik = () => {
         if(!selectedRombel) { showToast('Pilih Rombel Terlebih Dahulu!'); return; }
-        
+        const currentLocked = guruRombelConfig[username] || '';
+        // PROTEKSI: Cegah perubahan rombel tanpa konfirmasi → mencegah data Materi/Nilai
+        // milik rombel lama tampak "hilang" karena view berpindah ke rombel baru.
+        if (currentLocked && currentLocked !== selectedRombel) {
+          const ok = window.confirm(
+            `PERINGATAN!\n\nAnda sudah terkunci di Rombel ${currentLocked}.\n` +
+            `Mengganti ke ${selectedRombel} akan menyembunyikan tampilan data Materi & Nilai milik ${currentLocked} dari layar Anda ` +
+            `(data tetap tersimpan di database, tetapi tidak akan terlihat selama Anda memilih rombel lain).\n\nLanjutkan ganti rombel?`
+          );
+          if (!ok) return;
+        }
         setGuruRombelConfig(prev => {
           const updated = { ...prev, [username]: selectedRombel };
           syncToCloud('guruRombelConfig', updated, profil.tahunAjaran);
@@ -4447,7 +4503,7 @@
                   </div>
 
                   <div class="text-center w-1/3 flex flex-col items-center">
-                    <p class="m-0">${cetakKecamatan}, ${profil.tanggalRaport}</p>
+                    <p class="m-0">${cetakKecamatan}, ${formatTanggalIndo(profil.tanggalRaport)}</p>
                     <p style="margin-bottom: 2.2cm;">Wali Kelas</p>
                     <p class="font-bold underline uppercase m-0 leading-tight">${waliKelasName}</p>
                     ${waliNIP ? `<p class="m-0 leading-tight">NIP. ${waliNIP}</p>` : ''}
@@ -4598,7 +4654,7 @@
 
              <div style="display: flex; justify-content: flex-end; align-items: flex-end; margin-top: 40px; padding-right: 20px; position: relative; z-index: 10;">
                 <div style="width: 250px; text-align: center;">
-                   <p style="margin-bottom: 5px; line-height: 1.2;">${cetakKecamatan}, ${profil.tanggalRaport}</p>
+                   <p style="margin-bottom: 5px; line-height: 1.2;">${cetakKecamatan}, ${formatTanggalIndo(profil.tanggalRaport)}</p>
                    <p style="margin-bottom: 2.2cm; font-weight: bold; line-height: 1.2;">Kepala Sekolah</p>
                    <p style="font-weight: bold; text-decoration: underline; text-transform: uppercase; margin: 0; padding: 0; line-height: 1.2;">${profil.kepalaSekolah}</p>
                    ${profil.nip && profil.nip !== '-' ? `<p style="margin: 0; padding: 0; line-height: 1.2;">NIP. ${profil.nip}</p>` : ''}
