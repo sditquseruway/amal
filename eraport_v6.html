@@ -4,7 +4,6 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>E-Raport Qu - Kurikulum Merdeka</title>
-
   <!-- SEO & Social Sharing Meta Tags (Open Graph + Twitter Card) -->
   <meta name="description" content="E-Raport Qu - Aplikasi cetak rapor digital Kurikulum Merdeka. Mudah, cepat, dan modern untuk seluruh guru & wali kelas.">
   <meta name="theme-color" content="#0d5c3b">
@@ -277,25 +276,47 @@ function mergePerKeySlices(allData) {
     });
     merged[prefix] = base;
   });
+  // ---- Per-kelas slices untuk Data Siswa: allStudents::<rombel> ----
+  // Setiap slice berisi DAFTAR LENGKAP siswa pada rombel tsb. Saat edit per
+  // kelas, hanya rombel yang diubah yang ditulis ulang; data kelas lain tetap
+  // terbaca dari data lama.
+  {
+    const sliceKeys = Object.keys(allData).filter(k => k.indexOf('allStudents::') === 0);
+    if (sliceKeys.length) {
+      let arr = Array.isArray(merged.allStudents) ? merged.allStudents.slice() : [];
+      sliceKeys.forEach(k => {
+        const rombel = k.slice('allStudents::'.length);
+        const slice = Array.isArray(allData[k]) ? allData[k] : [];
+        arr = arr.filter(s => s && (s.rombelSD || '') !== rombel);
+        arr = arr.concat(slice);
+      });
+      merged.allStudents = arr;
+    }
+  }
+  // ---- Per-record slices untuk Data Guru: teachers::<id> ----
+  {
+    const sliceKeys = Object.keys(allData).filter(k => k.indexOf('teachers::') === 0);
+    if (sliceKeys.length) {
+      const byId = new Map();
+      (Array.isArray(merged.teachers) ? merged.teachers : []).forEach(t => {
+        if (t && t.id != null) byId.set(String(t.id), t);
+      });
+      sliceKeys.forEach(k => {
+        const id = k.slice('teachers::'.length);
+        const val = allData[k];
+        if (val == null || (val && val.__deleted)) byId.delete(id);
+        else byId.set(id, val);
+      });
+      merged.teachers = Array.from(byId.values());
+    }
+  }
   return merged;
 }
 function toEYDName(s) {
   if (s == null) return '';
-  const str = String(s).trim();
-  if (!str) return '';
-  const upperWords = new Set(['SD', 'SDN', 'SMP', 'SMA', 'MTS', 'MA', 'SDIT', 'MI', 'TK', 'PAUD', 'UPTD', 'NIP', 'NIK', 'NUPTK', 'S.Pd', 'S.Pd.', 'S.Pd.I', 'S.Pd.SD', 'M.Pd', 'M.Pd.', 'S.Ag', 'S.E', 'S.H', 'S.Sos', 'S.Kom', 'A.Ma', 'A.Md']);
-  return str.toLowerCase().split(/\s+/).map(w => {
-    if (!w) return w;
-    const up = w.toUpperCase();
-    if (upperWords.has(up) || upperWords.has(w)) return up;
-    if (w.indexOf('.') !== -1) {
-      return w.split('.').map(p => p ? p.charAt(0).toUpperCase() + p.slice(1) : p).join('.');
-    }
-    if (w.indexOf('-') !== -1) {
-      return w.split('-').map(p => p ? p.charAt(0).toUpperCase() + p.slice(1) : p).join('-');
-    }
-    return w.charAt(0).toUpperCase() + w.slice(1);
-  }).join(' ');
+  // Tampilkan nama & gelar PERSIS seperti yang diisi di profil/data guru.
+  // Tidak ada perubahan format (kapitalisasi/gelar tetap apa adanya).
+  return String(s).trim();
 }
 const GAS_URL = (__SC.appsScriptUrl || '').trim();
 if (!GAS_URL) {
@@ -1334,6 +1355,7 @@ function App() {
             mapelList: activeMapelList,
             studentGrades: studentGrades,
             calculateNA: calculateNA,
+            materiGuru: materiGuru,
             appConfig: appConfig
           });
         case 'profil_guru':
@@ -1488,6 +1510,7 @@ function App() {
             mapelList: activeMapelList,
             studentGrades: studentGrades,
             calculateNA: calculateNA,
+            materiGuru: materiGuru,
             appConfig: appConfig
           });
       }
@@ -1874,6 +1897,7 @@ function AdminTarikSemesterLalu({
     if (picks.teachers && Array.isArray(data.teachers)) {
       setTeachers(data.teachers);
       syncToCloud('teachers', data.teachers, profil.tahunAjaran);
+      data.teachers.forEach(t => t && t.id != null && syncToCloud(`teachers::${t.id}`, t, profil.tahunAjaran));
       count++;
     }
     if (picks.mapel && Array.isArray(data.mapel)) {
@@ -1899,6 +1923,7 @@ function AdminTarikSemesterLalu({
     if (picks.allStudents && Array.isArray(data.allStudents)) {
       setAllStudents(data.allStudents);
       syncToCloud('allStudents', data.allStudents, profil.tahunAjaran);
+      new Set(data.allStudents.map(s => s.rombelSD || '')).forEach(r => syncToCloud(`allStudents::${r}`, data.allStudents.filter(s => (s.rombelSD || '') === r), profil.tahunAjaran));
       count++;
     }
     showToast(`✅ Berhasil menarik ${count} kategori data. Memuat ulang…`);
@@ -2561,6 +2586,8 @@ function AdminDataGuru({
         }).filter(t => t !== null);
         if (parsed.length > 0) {
           showConfirm(`Tarik CSV menemukan ${parsed.length} guru. Data ini akan MENGGANTIKAN data guru saat ini. Lanjutkan?`, () => {
+            // Hapus slice per-guru lama agar tidak memunculkan kembali data lama.
+            teachers.forEach(t => syncToCloud(`teachers::${t.id}`, { __deleted: true, id: t.id }, profil.tahunAjaran));
             setTeachers(parsed);
             syncToCloud('teachers', parsed, profil.tahunAjaran);
             showToast(`Berhasil Sinkronisasi ${parsed.length} Data Guru!`);
@@ -2594,12 +2621,15 @@ function AdminDataGuru({
       ...editGuruForm
     } : x);
     setTeachers(updated);
-    await syncToCloud('teachers', updated, profil.tahunAjaran);
+    // Simpan hanya record guru yang diubah; data guru lain tetap terbaca.
+    const edited = updated.find(x => x.id === editTeacher.id);
+    await syncToCloud(`teachers::${editTeacher.id}`, edited, profil.tahunAjaran);
     setEditTeacher(null);
     showToast('Data guru berhasil diperbarui & tersimpan!');
   };
   const deleteAllTeachers = () => {
     showConfirm('PERINGATAN: Anda akan menghapus SELURUH data guru. Lanjutkan?', () => {
+      teachers.forEach(t => syncToCloud(`teachers::${t.id}`, { __deleted: true, id: t.id }, profil.tahunAjaran));
       setTeachers([]);
       syncToCloud('teachers', [], profil.tahunAjaran);
       showToast('Semua data guru telah dihapus.');
@@ -2609,7 +2639,7 @@ function AdminDataGuru({
     showConfirm('Yakin ingin menghapus data guru ini?', () => {
       const updated = teachers.filter(t => t.id !== id);
       setTeachers(updated);
-      syncToCloud('teachers', updated, profil.tahunAjaran);
+      syncToCloud(`teachers::${id}`, { __deleted: true, id }, profil.tahunAjaran);
       showToast('Data guru berhasil dihapus!');
     });
   };
@@ -3066,6 +3096,15 @@ function AdminDataSiswa({
   const [loading, setLoading] = useState(false);
   const [showPaste, setShowPaste] = useState(false);
   const [pasteData, setPasteData] = useState('');
+  // Tulis seluruh data siswa SEKALIGUS sebagai array penuh + slice per-rombel,
+  // agar slice per-kelas tetap konsisten dan tidak menimpa hasil impor massal.
+  const syncStudentsFull = arr => {
+    syncToCloud('allStudents', arr, profil.tahunAjaran);
+    const rombels = new Set(arr.map(s => s.rombelSD || ''));
+    rombels.forEach(r => {
+      syncToCloud(`allStudents::${r}`, arr.filter(s => (s.rombelSD || '') === r), profil.tahunAjaran);
+    });
+  };
   const handlePasteSiswa = () => {
     try {
       const rows = pasteData.split('\n').filter(r => r.trim() !== '');
@@ -3094,7 +3133,7 @@ function AdminDataSiswa({
       });
       const merged = [...allStudents, ...newSiswa];
       setAllStudents(merged);
-      syncToCloud('allStudents', merged, profil.tahunAjaran);
+      syncStudentsFull(merged);
       setShowPaste(false);
       setPasteData('');
       showToast(`${newSiswa.length} siswa berhasil diimpor!`);
@@ -3147,22 +3186,32 @@ function AdminDataSiswa({
       }
     } : x);
     setAllStudents(updated);
-    await syncToCloud('allStudents', updated, profil.tahunAjaran);
+    // Simpan hanya per-kelas yang terdampak (rombel lama & baru bila pindah kelas).
+    // Data kelas lain tidak ditulis ulang sehingga tidak menimpa/menghilang.
+    const affectedRombel = new Set([editStudent.rombelSD || '', editForm.rombelSD || '']);
+    for (const r of affectedRombel) {
+      await syncToCloud(`allStudents::${r}`, updated.filter(s => (s.rombelSD || '') === r), profil.tahunAjaran);
+    }
     setEditStudent(null);
     showToast('Data siswa berhasil diperbarui & tersimpan!');
   };
   const deleteSiswa = id => {
     if (!window.confirm('Yakin ingin menghapus data siswa ini?')) return;
+    const target = allStudents.find(x => x.id === id) || {};
+    const r = target.rombelSD || '';
     const updated = allStudents.filter(x => x.id !== id);
     setAllStudents(updated);
-    syncToCloud('allStudents', updated, profil.tahunAjaran);
+    syncToCloud(`allStudents::${r}`, updated.filter(s => (s.rombelSD || '') === r), profil.tahunAjaran);
     showToast('Data siswa berhasil dihapus.');
   };
   const deleteAllSiswa = () => {
     if (!window.confirm('PERINGATAN: Anda akan menghapus SELURUH data siswa. Lanjutkan?')) return;
     if (!window.confirm('Konfirmasi sekali lagi: hapus SEMUA siswa?')) return;
+    // Kosongkan juga seluruh slice per-rombel agar tidak muncul kembali saat dimuat ulang.
+    const rombels = new Set(allStudents.map(s => s.rombelSD || ''));
     setAllStudents([]);
     syncToCloud('allStudents', [], profil.tahunAjaran);
+    rombels.forEach(r => syncToCloud(`allStudents::${r}`, [], profil.tahunAjaran));
     showToast('Semua data siswa telah dihapus.');
   };
   const downloadTemplateSiswa = () => {
@@ -3223,7 +3272,7 @@ function AdminDataSiswa({
         if (parsed.length > 0) {
           setAllStudents(parsed);
           showToast(`Berhasil Sinkronisasi Master Data ${parsed.length} Siswa!`);
-          syncToCloud('allStudents', parsed, profil.tahunAjaran);
+          syncStudentsFull(parsed);
         } else {
           throw new Error("Data kosong atau format salah");
         }
@@ -4655,23 +4704,32 @@ function GuruDashboard({
   mapelList,
   studentGrades,
   calculateNA,
+  materiGuru,
   appConfig
 }) {
   const {
     timeLeft,
     isExpired
   } = useCountdown(appConfig.deadline);
-  let totalExpected = mapelList.length * students.length;
+  const mg = materiGuru || {};
+  const hasTP = (rombel, m) => {
+    const arr = mg[`${rombel}_${m}`] || [];
+    return Array.isArray(arr) && arr.some(v => v && String(v).trim() !== '');
+  };
+  // Hanya mapel yang sudah diisi TP yang dihitung sebagai pekerjaan.
+  // Jika TP belum diisi, mapel tsb tidak masuk hitungan (dianggap belum/0%).
+  const mapelWithTP = mapelList.filter(m => students.some(s => hasTP(s.rombelSD, m)));
+  let totalExpected = 0;
   let totalFilled = 0;
-  if (totalExpected > 0) {
-    mapelList.forEach(m => {
-      students.forEach(s => {
-        if (calculateNA(m, s.id, s.rombelSD) !== null) {
-          totalFilled++;
-        }
-      });
+  mapelWithTP.forEach(m => {
+    students.forEach(s => {
+      if (!hasTP(s.rombelSD, m)) return;
+      totalExpected++;
+      if (calculateNA(m, s.id, s.rombelSD) !== null) {
+        totalFilled++;
+      }
     });
-  }
+  });
   const progress = totalExpected === 0 ? 0 : Math.round(totalFilled / totalExpected * 100);
   return React.createElement("div", {
     className: "space-y-4 sm:space-y-6"
@@ -4739,12 +4797,15 @@ function GuruDashboard({
     className: "text-slate-500 font-medium text-xs sm:text-sm mb-3 sm:mb-4"
   }, "Perhitungan diakumulasi dari total ", React.createElement("b", null, students.length, " Siswa"), " pada ", React.createElement("b", null, mapelList.length, " Mata Pelajaran"), "."), React.createElement("div", {
     className: "flex gap-1.5 sm:gap-2 flex-wrap justify-center md:justify-start"
-  }, mapelList.map(m => {
+  }, mapelWithTP.map(m => {
     let filledForMapel = 0;
+    let expForMapel = 0;
     students.forEach(s => {
+      if (!hasTP(s.rombelSD, m)) return;
+      expForMapel++;
       if (calculateNA(m, s.id, s.rombelSD) !== null) filledForMapel++;
     });
-    const isDone = students.length > 0 && filledForMapel === students.length;
+    const isDone = expForMapel > 0 && filledForMapel === expForMapel;
     return React.createElement("span", {
       key: m,
       className: `px-2 py-1 sm:px-3 sm:py-1 rounded-md sm:rounded-lg text-[10px] sm:text-xs font-bold ${isDone ? 'bg-primaryLight text-primaryHover' : 'bg-slate-100 text-slate-500'}`
